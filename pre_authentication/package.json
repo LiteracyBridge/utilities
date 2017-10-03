@@ -1,0 +1,8 @@
+{
+  "name": "stats_log_consolidation",
+  "version": "0.0.1",
+  "dependencies": {
+    "aws-sdk": "^2.49.0",
+    "dynamodb-doc": "^1.0.0"
+  }
+}
