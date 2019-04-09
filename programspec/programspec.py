@@ -163,8 +163,8 @@ class Program:
         return any(x.has_changes for x in self.components.values())
 
     # save the changes in this Program Specification back to new_file
-    def save_changes(self, filename: str):
-        if self.has_changes:
+    def save_changes(self, filename: str, force_save: bool = False):
+        if self.has_changes or force_save:
             print('Saving changes as {}'.format(filename))
             for component in self.components.values():
                 component.save_changes(self._reader)

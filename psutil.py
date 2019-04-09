@@ -158,6 +158,9 @@ def do_validation():
 
 def do_reconcilation(updates: set):
     global args
+    if args.acm is None:
+        print('Error: reconcile operation requires --acm argument')
+        return
     prog_spec = _validate()
     outpath = None
     if prog_spec:
@@ -166,7 +169,7 @@ def do_reconcilation(updates: set):
         acmdir = cannonical_acm_path_name(args.acm)
         reconcillation.reconcile(acmdir, prog_spec, args.strategy, update=updates, outdir=args.outdir)
         if XLSX in updates:
-            prog_spec.save_changes(outpath)
+            prog_spec.save_changes(outpath, True)
 
 def do_exports():
     global args

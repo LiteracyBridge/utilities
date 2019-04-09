@@ -20,12 +20,14 @@ from programspec.recipient_utils import RecipientUtils
 _file_substitutions = re.compile('[^\w-]+')
 
 
-def _recip_key(comm_or_recip, group_or_none:None, se_or_none:None):
+def _recip_key(comm_or_recip, group_or_none: None, se_or_none: None):
     pass
+
 
 # Cannonicalize strings to upper case before fuzzy matching.
 def ufuzz(left, right):
     return fuzz.ratio(left.upper(), right.upper())
+
 
 class FuzzyDirectoryMatcher:
     def __init__(self, reconciler):
@@ -35,7 +37,7 @@ class FuzzyDirectoryMatcher:
 
     # Sets values used outside of the walk function.
     def _prepare(self):
-        self.dirs = sorted([d for d in self._reconciler._unmatched_dirs], key=lambda d:d.upper())
+        self.dirs = sorted([d for d in self._reconciler._unmatched_dirs], key=lambda d: d.upper())
         self.recips = sorted([r for r in self._reconciler._unmatched_recipients], key=lambda r: self._fmt(r).upper())
         self.dir_width = max([0] + [len(d) for d in self.dirs]) + 5
         self.recip_width = max([0] + [len(self._fmt(r)) for r in self.recips]) + 5
@@ -45,12 +47,13 @@ class FuzzyDirectoryMatcher:
         dirs = self.dirs
         recips = self.recips
         # Does a fuzzy match on the d'th dir and r'th recip, -1 if no such element
-        fz = lambda d, r: ufuzz(dirs[d].replace(' ',''), self._fmt(recips[r]).replace(' ','')) if d < len(dirs) and r < len(recips) else -1
+        fz = lambda d, r: ufuzz(dirs[d].replace(' ', ''), self._fmt(recips[r]).replace(' ', '')) if d < len(
+            dirs) and r < len(recips) else -1
 
         while len(dirs) and len(recips):
             # Compare current elements, plus 1 & 2 lookaheads. The comparisons of 2,1 and 1,2 don't seem to
             # affect the outcome, but they do affect how we get there.
-            score = [fz(0,0), fz(1,0), fz(0,1), fz(2,0), fz(0,2)] #, fz(2,1), fz(1,2)]
+            score = [fz(0, 0), fz(1, 0), fz(0, 1), fz(2, 0), fz(0, 2)]  # , fz(2,1), fz(1,2)]
             max_score = max(score)
             # Is any of them good enough?
             if max_score > self._reconciler._threshold:
@@ -59,7 +62,7 @@ class FuzzyDirectoryMatcher:
                 # comparisons again.
                 if score_ix == 0:
                     matched(recips.pop(0), dirs.pop(0), max_score)
-                elif score_ix%2 == 1:
+                elif score_ix % 2 == 1:
                     # The next or second left matches the current right better. Skip one left.
                     advanced_dirs(dirs.pop(0))
                 else:
@@ -78,13 +81,13 @@ class FuzzyDirectoryMatcher:
 
     def make_matches(self):
         self._prepare()
-        matched = lambda r,d,s: matches.append((r,d,s))
+        matched = lambda r, d, s: matches.append((r, d, s))
         advanced = lambda x: None  # doesn't do anything, so use same one for left and right
 
         num_matched = 0
         matches = []
         self._walk(matched, advanced, advanced)
-        while len(matches)>0:
+        while len(matches) > 0:
             num_matched = num_matched + len(matches)
             for recip, directory, score in matches:
                 self._reconciler.remove_matched(recip, directory, score)
@@ -96,31 +99,34 @@ class FuzzyDirectoryMatcher:
     def print_unmatched(self):
         self._prepare()
         # convenience shortcuts
-        fmt = lambda r: '{}/{}'.format(r[0],r[1])
-        matched = lambda d,r,s: print('  {:{lw}} {:{rw}} ({}% match)'.format('{}/{}'.format(r[0],r[1]), d, s, lw=lw, rw=rw))
+        fmt = lambda r: '{}/{}'.format(r[0], r[1])
+        matched = lambda d, r, s: print(
+            '  {:{lw}} {:{rw}} ({}% match)'.format('{}/{}'.format(r[0], r[1]), d, s, lw=lw, rw=rw))
         advanced_dirs = lambda d: print('  {:{lw}} {:{rw}}'.format('', d, lw=lw, rw=rw))
-        advanced_recips = lambda r: print('  {:{lw}} {:{rw}}'.format('{}/{}'.format(r[0],r[1]), '', lw=lw, rw=rw))
+        advanced_recips = lambda r: print('  {:{lw}} {:{rw}}'.format('{}/{}'.format(r[0], r[1]), '', lw=lw, rw=rw))
 
         cghead = '{} Community/Groups'.format(len(self.recips))
         dirhead = '{} Directories'.format(len(self.dirs))
         lw = max(self.recip_width, len(cghead))
         rw = max(self.dir_width, len(dirhead))
 
-        if len(self.recips)>0 or len(self.dirs)>0:
+        if len(self.recips) > 0 or len(self.dirs) > 0:
             print('Unmatched directories and communities')
             print('  {:{lw}} {:{rw}}'.format(cghead, dirhead, lw=lw, rw=rw))
             print('  {:-^{lw}} {:-^{rw}}'.format('', '', rw=rw, lw=lw))
 
             self._walk(matched, advanced_dirs, advanced_recips)
 
+
 class Reconciler:
     def __init__(self, acmdir, spec: programspec, strategy: int, update: set, outdir):
         def _strategy0(r):
             return _file_substitutions.sub('_', r[1])
+
         def _strategy3(r):
             # community {-group_or_community_worker}
-            grp = '-'+r[1] if r[1] else ''
-            return _file_substitutions.sub('_', r[0]+grp)
+            grp = '-' + r[1] if r[1] else ''
+            return _file_substitutions.sub('_', r[0] + grp)
 
         self._acmdir = acmdir
         self._spec = spec
@@ -153,7 +159,7 @@ class Reconciler:
         self._recipients_by_directory_from_spec = {}
         # dictionary of {(community, group) : Recipient }, from the Program Specification
         self._recipients_by_community_group_from_spec = {}
-        #dictionary of {community : [Recipient,...]} from the Program Specification
+        # dictionary of {community : [Recipient,...]} from the Program Specification
         self._recipients_by_community_from_spec = {}
 
         # list of [(recipient, directory, score)], where recipient is (community, group)
@@ -171,7 +177,7 @@ class Reconciler:
         elif strategy == 2:
             self._fmt = lambda r: '{}{}{}'.format(r[1] if r[1] else '', '-' if r[1] else '', r[0])
         elif strategy == 1:
-            self._fmt = lambda r: '{}{}{}'.format(r[0], ' 'if r[1]else'', r[1] if r[1]else'')
+            self._fmt = lambda r: '{}{}{}'.format(r[0], ' ' if r[1] else '', r[1] if r[1] else '')
         else:
             self._fmt = _strategy0
 
@@ -207,9 +213,10 @@ class Reconciler:
             # Is there a "group_name", and is it unique? If so, use that for agent.
             # Otherwise try with support_entity.
             # Otherwise concat group_name, support_entity, and model.
-            if recip.group_name and all([r==recip or recip.group_name!=r.group_name for r in community_recipients]):
+            if recip.group_name and all([r == recip or recip.group_name != r.group_name for r in community_recipients]):
                 keys.append(recip.group_name)
-            elif recip.support_entity and all([r==recip or recip.support_entity!=r.support_entity for r in community_recipients]):
+            elif recip.support_entity and all(
+                    [r == recip or recip.support_entity != r.support_entity for r in community_recipients]):
                 keys.append(recip.support_entity)
             else:
                 keys.append(recip.model)
@@ -224,8 +231,8 @@ class Reconciler:
         a = tup[0]
         b = tup[1]
         for k in tup[2:]:
-            b += '_'+k
-        return (a,b)
+            b += '_' + k
+        return (a, b)
 
         # if recip.model.lower() == 'hhr':
         #     return (recip.community, None)
@@ -239,7 +246,7 @@ class Reconciler:
         tup = self._recip_tuple(recip)
         name = tup[0]
         for k in tup[1:]:
-            name += '/'+k
+            name += '/' + k
         return name
         #
         # if recip.model.lower() == 'hhr':
@@ -268,7 +275,6 @@ class Reconciler:
         #
         #     return '{}/{}'.format(recip.community, agent)
 
-
     # Move the unused directories out of the communities directory.
     def _remove_unused_directories(self):
         path = Path(self.retired_communities_dir)
@@ -281,11 +287,11 @@ class Reconciler:
             while target_path.exists():
                 increment += 1
                 target_dir = '{}-{}'.format(unmatched_dir, increment)
-                target_path=path.joinpath(target_dir)
+                target_path = path.joinpath(target_dir)
             print('Moving {} to {}'.format(unmatched_dir, target_dir))
             unmatched_path.rename(target_path)
 
-    def _normalize_pathname(self, pathname : str):
+    def _normalize_pathname(self, pathname: str):
         # Replace whitespace with underscores, eliminate some problematic characters.
         pathname = re.sub(r'\s', '_', pathname)
         pathname = re.sub(r'[\\\'"&*?]+', '', pathname)
@@ -300,7 +306,7 @@ class Reconciler:
 
         ## RECIP NAME
         # Compute the directory name and full path to the community/group directory
-        directory = self._fmt(self._recip_key(recipient)) # (recipient.community, recipient.group_name))
+        directory = self._fmt(self._recip_key(recipient))  # (recipient.community, recipient.group_name))
         directory = self._normalize_pathname(directory)
         path = Path(self.communities_dir, directory)
         if path.exists() or directory.upper() in self._upper_case_directory_names:
@@ -324,7 +330,7 @@ class Reconciler:
         recipient.directory_name = directory
 
     def _create_directories_for_recipients(self):
-        ## RECIP NAME
+        # RECIP NAME
         for community, group in self._unmatched_recipients:
             recipient = self._recipients_by_community_group_from_spec[(community, group)]
             self._create_directory_for_recipient(recipient)
@@ -335,14 +341,15 @@ class Reconciler:
         mark = errors.get_mark()
         directories_to_create = {}
         directory_collisions = {}
-        ## RECIP NAME
+        # RECIP NAME
         for community, group in self._unmatched_recipients:
             recipient = self._recipients_by_community_group_from_spec[(community, group)]
             if recipient.directory_name is not None:  # already has a directory
                 continue
             # Compute the directory name, and check for collisions with existing or to-be-created directories
-            ## RECIP NAME
-            directory = self._fmt(self._recip_key(recipient)).upper() #(recipient.community, recipient.group_name)).upper()
+            # RECIP NAME
+            directory = self._fmt(
+                self._recip_key(recipient)).upper()  # (recipient.community, recipient.group_name)).upper()
             if directory in self._upper_case_directory_names:
                 errors.err(errors.community_directory_exists, {'directory': directory,
                                                                'community': '{}'.format(
@@ -505,10 +512,10 @@ class Reconciler:
     # Print the matches that were found.
     def print_matched(self):
         print('Matched {} community/groups  -->  directories:'.format(len(self._matches)))
-        if len(self._matches)==0:
+        if len(self._matches) == 0:
             print('  No matches.')
             return
-        if len([r for r,d,s in self._matches if s!='recipientid'])==0:
+        if len([r for r, d, s in self._matches if s != 'recipientid']) == 0:
             print('  All match by recipientid.')
             return
         print_data = [('{}/{}'.format(r[0], r[1]), d, s) for r, d, s in self._matches]
@@ -521,7 +528,7 @@ class Reconciler:
     # Prints the unmatched community/groups, with the groups that DO match, plus the model, if a group is None.
     def print_unmatched(self):
         unmatched_groups = self.unmatched_groups_by_community()
-        if len(unmatched_groups)==0:
+        if len(unmatched_groups) == 0:
             print('No unmatched communities.')
             return
 
@@ -652,7 +659,7 @@ class Reconciler:
                 return True
 
         n_removed = 0
-#        uppercase_dirs = [x.upper() for x in self._unmatched_dirs]
+        #        uppercase_dirs = [x.upper() for x in self._unmatched_dirs]
         for recip in copy.copy(self._unmatched_recipients):
             # Does this recipient already know its directory?
             recipient = self._recipients_by_community_group_from_spec[recip]
@@ -699,11 +706,13 @@ class Reconciler:
     def write_deployments_file(self, outdir):
         deployments_file = Path(outdir, 'deployments.csv')
         with deployments_file.open(mode='w', newline='\n') as depls:
-            print('project,deployment,deploymentname,deploymentnumber,startdate,enddate,distribution,comment', file=depls)
+            print('project,deployment,deploymentname,deploymentnumber,startdate,enddate,distribution,comment',
+                  file=depls)
             deployments = {n: self._spec.get_deployment(n) for n in sorted(self._spec.deployment_numbers)}
             for n, depl in deployments.items():
-                name = '{}-{}-{}'.format(self._spec.project, depl.start_date.year%100, n)
-                line = [self._spec.project, name, '', str(n), str(depl.start_date.date()), str(depl.end_date.date()), '', '']
+                name = '{}-{}-{}'.format(self._spec.project, depl.start_date.year % 100, n)
+                line = [self._spec.project, name, '', str(n), str(depl.start_date.date()), str(depl.end_date.date()),
+                        '', '']
                 print(','.join(line), file=depls)
 
     def reconcile(self):
@@ -754,5 +763,5 @@ def reconcile(acmdir, spec: programspec, strategy: int, update: set, outdir=None
     reconciler = Reconciler(acmdir, spec, strategy, update, outdir)
     result = reconciler.reconcile()
     end = time.time()
-    print('Reconciled in {:.2g} seconds'.format(end-start))
+    print('Reconciled in {:.2g} seconds'.format(end - start))
     return result

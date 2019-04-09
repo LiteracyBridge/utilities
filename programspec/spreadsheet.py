@@ -141,6 +141,15 @@ class Spreadsheet:
             print('{} {}: {}'.format(*err), file=sys.stderr)
 
     def _sheet_type_for(self, sheet_name: str):
+        '''
+        Given a sheet name, return the sheet type. For sheets like 'General', or 'Content', the sheet type is
+        also the sheet name, but for component recipient sheets, the name will be component's name. If the name
+        matches a known component, then it is a 'recipient' type of sheet. Otherwise, we just hope that it
+        is a recipient sheet (if it isn't it'll surely have lots of errors, so it is a very low probability of
+        causing real problems.
+        :param sheet_name: The name of the sheet.
+        :return: The type of the sheet.
+        '''
         if sheet_name in required_columns:
             return sheet_name
         if sheet_name in self._components:
@@ -150,8 +159,10 @@ class Spreadsheet:
 
     # Given a row from a sheet of type sheet_type, extract any optional data into a dictionary.
     def _extract_optional_members(self, row_dict, sheet_type: str):
+        # lazy init { sheet_type : [ optional_prop1, optional_prop2, ... ] }
         if sheet_type not in self._optional_member_names:
-            self._optional_member_names[sheet_type] = [column_name_to_property_name_map[c] for c in optional_columns[sheet_type]]
+            self._optional_member_names[sheet_type] = [column_name_to_property_name_map[c] for c in
+                                                       optional_columns[sheet_type]]
         optional_member_names = self._optional_member_names[sheet_type]
         optionals = {k: row_dict[k] for k in optional_member_names if k in row_dict and row_dict[k] is not None}
         return optionals
@@ -169,13 +180,13 @@ class Spreadsheet:
     #   include_partial_rows is True
     #
     # Row numbers start with 1.
-    def _get_rows_for_sheet(self, sheet_name: str, sheet_type: str=None, include_partial_rows: bool=False):
+    def _get_rows_for_sheet(self, sheet_name: str, sheet_type: str = None, include_partial_rows: bool = False):
         sheet_type = sheet_type or sheet_name
         # which columns and where they are in this sheet, as {column_name: column_ix}
         indices = self._indices[sheet_name]
-        # [(prop_name, column_ix)] of the columns we must have
+        # [(prop_name, column_ix)] of the columns we must have, the required columns.
         name_and_ix = [(column_name_to_property_name_map[c], indices[c]) for c in required_columns[sheet_type]]
-        # Add the columns we may or may not have
+        # Add the columns we may or may not have, the optional columns.
         if sheet_type in optional_columns:
             for c in optional_columns[sheet_type]:
                 if c in indices:
@@ -188,9 +199,10 @@ class Spreadsheet:
         required_cell_indices = [(self._indices[sheet_name][column], column) for column in required_cells]
 
         # Get the spreadsheet data.
-        # Getting a slice of a single row returns the row, not a list with one element, but we always want a list.
         sh = self._wb[sheet_name]
-        raw_rows = sh['2:{}'.format(sh.max_row + 1)]
+        # Getting a slice of a single row returns the row, not a list with one element, but we always want a list. So,
+        # get a slice of one more than we want, which will always be a list, then slice that down to what we do want.
+        raw_rows = sh[2:sh.max_row + 1]
         raw_rows = raw_rows[0:len(raw_rows) - 1]
 
         result = []
@@ -207,10 +219,11 @@ class Spreadsheet:
             if len(missing) > 0:
                 self.warn(errors.missing_sheet_values,
                           {'columns': '", "'.join(missing), 'sheet': sheet_name, 'row': row_num})
-            if len(missing)==0 or include_partial_rows:
+            if len(missing) == 0 or include_partial_rows:
                 # We have what we need; add to the result.
                 # Build list of [dictionary of {member_name: column.value}]
-                row_dict = {name: (xstrip(row[cell_ix].value) if cell_ix is not None else None) for name, cell_ix in name_and_ix}
+                row_dict = {name: (xstrip(row[cell_ix].value) if cell_ix is not None else None) for name, cell_ix in
+                            name_and_ix}
                 row_dict['row_num'] = row_num
                 result.append(row_dict)
 
@@ -277,6 +290,7 @@ class Spreadsheet:
     def _no_dups(self, iterable, message, joiner=', ', args=None):
         if args is None:
             args = {}
+        # Get any items that appear more than once in iterable.
         dups = {item for item in iterable if iterable.count(item) > 1}
         if len(dups) > 0:
             args['duplicates'] = joiner.join([str(d) for d in dups])
@@ -286,6 +300,7 @@ class Spreadsheet:
     def _all_valid(self, iterable, valid_list, message, joiner=', ', args=None):
         if args is None:
             args = {}
+        # Get any items in iterable that are not in the valid_list.
         not_valid = [item for item in iterable if item not in valid_list]
         if len(not_valid) > 0:
             args['invalid'] = joiner.join([str(d) for d in not_valid])
@@ -295,6 +310,7 @@ class Spreadsheet:
     def _no_missing(self, iterable, required_list, message, joiner=', ', args=None):
         if args is None:
             args = {}
+        # Get any items that are missing from the required list.
         missing = [reqd for reqd in required_list if reqd not in iterable]
         if len(missing) > 0:
             args['missing'] = joiner.join([str(m) for m in missing])
@@ -313,11 +329,13 @@ class Spreadsheet:
             deployment_row = utils.JsObject(row)
             if deployment_row.start_date >= deployment_row.end_date:
                 self.err(errors.deployment_start_after_end,
-                         {'start': deployment_row.start_date, 'end': deployment_row.end_date, 'deployment': deployment_row.deployment_num})
+                         {'start': deployment_row.start_date, 'end': deployment_row.end_date,
+                          'deployment': deployment_row.deployment_num})
             if deployment_row.deployment_num < 0:
                 self.err(errors.deployment_lt_zero, {'deployment': deployment_row.deployment_num})
             else:
-                self._deployments[deployment_row.deployment_num] = (deployment_row.start_date, deployment_row.end_date, filters)
+                self._deployments[deployment_row.deployment_num] = (
+                    deployment_row.start_date, deployment_row.end_date, filters)
 
         self._no_missing(self._deployments, range(min(depl_numbers), max(depl_numbers) + 1),
                          errors.missing_deployment_numbers)
@@ -350,7 +368,8 @@ class Spreadsheet:
             depl = content_row.deployment_num
             if depl not in self._deployments:
                 self.err(errors.message_unknown_deployment,
-                         {'row': content_row.row_num, 'deployment': depl, 'title': content_row.message_title})  # MESSAGE_TITLE
+                         {'row': content_row.row_num, 'deployment': depl,
+                          'title': content_row.message_title})  # MESSAGE_TITLE
             content.append(content_row)
 
         self._content = content
@@ -363,7 +382,8 @@ class Spreadsheet:
         for component_name in self._components:
             recipients = self._recipients[component_name]
             for recipient in recipients:
-                key = (recipient['community'].upper(), upr(recipient['group_name']), upr(recipient['support_entity']), upr(recipient['language']))
+                key = (recipient['community'].upper(), upr(recipient['group_name']), upr(recipient['support_entity']),
+                       upr(recipient['language']))
                 if key in recipients_seen:
                     repeat_of = recipients_seen[key]
                     args = {'community': recipient['community'], 'group': recipient['group_name'],
