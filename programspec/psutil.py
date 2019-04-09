@@ -5,7 +5,7 @@ import sys
 from os.path import expanduser
 from pathlib import Path
 
-from programspec import errors, spreadsheet, reconcillation, exporter
+from programspec import errors, spreadsheet, reconcillation, exporter, programspec
 from programspec.programspec_constants import XLSX, UPDATABLES
 from programspec.utils import KeyWords
 
@@ -147,7 +147,7 @@ def _validate():
             print('{}:'.format(errors.severity[error[0]]))
         print('  {}: {}'.format(error[1], error[2]))
     if not errors.has_error():
-        return ps.get_program_spec(cannonical_acm_project_name(args.acm))
+        return programspec.get_program_spec_from_spreadsheet(ps, cannonical_acm_project_name(args.acm))
 
 
 def do_validation():

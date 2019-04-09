@@ -4,7 +4,7 @@ import traceback
 
 from openpyxl import load_workbook
 
-from programspec import errors, utils, programspec
+from programspec import errors, utils
 from programspec.programspec_constants import GENERAL, CONTENT, DEPLOYMENTS, COMPONENTS, required_sheets, \
     required_columns, required_data, optional_columns, columns_to_members_map
 
@@ -75,6 +75,30 @@ class Spreadsheet:
 
         self._validate()
 
+    @property
+    def ok(self):
+        return self._ok
+
+    @property
+    def general_info(self):
+        return self._general_info
+
+    @property
+    def deployments(self):
+        return self._deployments
+
+    @property
+    def components(self):
+        return self._components
+
+    @property
+    def recipients(self):
+        return self._recipients
+
+    @property
+    def content(self):
+        return self._content
+
     # Save the data to the given file.
     def save(self, filename):
         self._wb.save(filename)
@@ -95,27 +119,6 @@ class Spreadsheet:
         sh.cell(row=row_number, column=indices[column_name] + 1, value=value)
         # Log the change.
         self._changes.append(('cell', row_number, indices[column_name] + 1, value))
-
-    # The ProgramSpec.Program that this Reader read. If any.
-    def get_program_spec(self, acm=None):
-        if not self._ok:
-            return None
-        partner = self._general_info['partner']
-        program_name = self._general_info['program']
-        program = programspec.Program(self, partner_name=partner, program_name=program_name, project_name=acm)
-        for depl, depl_info in self._deployments.items():
-            program.add_deployment(depl, depl_info[0], depl_info[1], depl_info[2])
-        for component_name in self._components:
-            component = program.add_component(component_name)
-            for r in self._recipients[component_name]:
-                component.add_recipient(r)
-        # The playlists and messages are (by definition) in the correct order
-        for js_message in self._content:
-            deployment = program.get_deployment(js_message.deployment_num)
-            playlist = deployment.get_playlist(js_message.playlist_title)
-            playlist.add_message(js_message.message_title, js_message.key_points, js_message.default_category, js_message.filters)
-
-        return program
 
     def err(self, err, err_args=None):
         global options

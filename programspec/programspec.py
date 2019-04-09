@@ -1,10 +1,34 @@
 import copy
 from collections import OrderedDict
 
+from programspec.spreadsheet import Spreadsheet
 from programspec.programspec_constants import columns_to_members_map, TAG
 
 RECIPIENT_FIELDS = set(columns_to_members_map('recipient').values())
 RECIPIENT_FIELDS.add('row_num')
+
+
+# The ProgramSpec.Program that this Reader read. If any.
+def get_program_spec_from_spreadsheet(spreadsheet : Spreadsheet, acm=None):
+    if not spreadsheet.ok:
+        return None
+    partner = spreadsheet.general_info['partner']
+    program_name = spreadsheet.general_info['program']
+    program = Program(spreadsheet, partner_name=partner, program_name=program_name, project_name=acm)
+    for depl, depl_info in spreadsheet.deployments.items():
+        program.add_deployment(depl, depl_info[0], depl_info[1], depl_info[2])
+    for component_name in spreadsheet.components:
+        component = program.add_component(component_name)
+        for r in spreadsheet.recipients[component_name]:
+            component.add_recipient(r)
+    # The playlists and messages are (by definition) in the correct order
+    for js_message in spreadsheet.content:
+        deployment = program.get_deployment(js_message.deployment_num)
+        playlist = deployment.get_playlist(js_message.playlist_title)
+        playlist.add_message(js_message.message_title, js_message.key_points, js_message.default_category,
+                             js_message.filters)
+
+    return program
 
 
 class Program:
