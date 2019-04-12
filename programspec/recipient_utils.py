@@ -144,10 +144,14 @@ class RecipientUtils:
 
         return existing_id
 
+    # Given the directory for some recipient, compute the recipientid.
+    def compute_recipientid(self, dir_name):
+        return self.compute_id(str(self.communities_dir) + ' ' + dir_name)
 
     # Given the directory for some recipient, create a recipient.id file. Compute the recipientid.
-    def create_recipient_id_file(self, dir_name):
-        recipientid = self.compute_id(str(self.communities_dir) + ' ' + dir_name)
+    def create_recipient_id_file(self, dir_name, recipientid=None):
+        if recipientid is None or len(recipientid)==0:
+            recipientid = self.compute_id(str(self.communities_dir) + ' ' + dir_name)
         path = Path(self.communities_dir, dir_name)
         recipientid_path = path.joinpath('recipient.id')
         with recipientid_path.open(mode='w', newline='\n') as f:
@@ -168,8 +172,8 @@ class RecipientUtils:
         syspath.mkdir(exist_ok=True)
         lang_grp = syspath.joinpath(lang + '.grp')
         lang_grp.touch(exist_ok=True)
-        # Compute the recipient id, and create the recipient id file
-        #recipientid = self._recipient_utils._create_recipient_id_file(directory)
-        recipientid = self.create_recipient_id_file(path.name)
+        # Compute the recipient id if needed, and create the recipient id file
+        recipientid = recipient.recipientid
+        recipientid = self.create_recipient_id_file(path.name, recipientid)
 
         return recipientid

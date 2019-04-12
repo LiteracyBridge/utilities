@@ -35,6 +35,7 @@ message_unknown_deployment = (ERROR, 550, 'Message #{row} refers to unknown depl
 
 community_directory_exists = (ERROR, 800, 'Directory "{directory}" already exists; can\'t use it for "{community}".')
 community_directory_would_collide = (ERROR, 801, 'Directory "{directory}" would collide; can\'t use it for "{communities}".')
+recipientid_would_collide = (ERROR, 802, 'Recipientid "{recipientid}" already for "{community2}"; can\'t use it for "{community}".')
 
 validation_exception = (ERROR, 900, 'Exception attempting to validate Program Specification: {message}')
 generic_issue = (ERROR, 999, '{message}')

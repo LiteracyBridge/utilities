@@ -12,67 +12,119 @@ from programspec.utils import KeyWords
 desc = """
 Program Specification Utility
 
-The Program Specification describes the deliverables of a Talking Book Program, including
-the content to be delivered, the schedule of those deliveries, and the recipients for 
-whom the content is intended. Additional metadata describes the locations of the 
-recipients, their language, demographics, and possibly when they will join into the 
-program.
+The Program Specification describes the deliverables of a Talking Book Program,
+including the content to be delivered, the schedule of those deliveries, and
+the recipients for whom the content is intended. Additional metadata describes
+the locations of the recipients, their language, demographics, and possibly
+when they will join into the program.
 
-The Program Specification is created as an .xlsx workbook file, with several sheets
-describing the particulars of the Program. 
+The Program Specification is created as an .xlsx workbook file, with several
+sheets describing the particulars of the Program.
 
-This application performs several utility functions relating to a Talking Book Program
-Specification:
-- Structural valiation of the workbook to ensure that the required sheets are present,
-  with their required columns and data.
-- Logical validation of the contents, including inter-relationships between data in the
-  several sheets.
-- Physical reconcillation of the Program Specification with an ACM database, specifically
-  the communities directory. The application can:
-  - Match Recipients with an existing communities directory structure, using several
-    heuristics to achieve a high level of confidence in the matches.
-  - Create the structure for the individual communities.
-  - Create recipient.id files in the individual directories.
-  - Update the spreadsheet with recipientid and directory.
-  - Create recipients.csv and recipients_map.csv for uploading to a database.
-  
-Future work may include:
-- Generation of a script to create a deployment.  
-    
-Note on directory strategy: Various schemes were used to create the directory names 
-  for recipients. Generally, the same strategy was used for most of the recipients
-  in a project, but there are outliers in every case. Also there was no consistency
-  in the casing of directory names. Strategies used, numbered arbitrarily:
-  0: '{group}'                (Group name)
-  1: '{community} {group}     (Community name, one or more spaces, and group name.)
-  2: '{group} - {community}'  (Group name, a hyphen, and community name. Zero or more 
-                                spaces before and/or after the hyphen.)
-  3: '{community}-{group}'    (Community name, hyphen, group. Spaces become '_'.)
+Commands:
+
+  validate   Validates the basic structure of the spreadsheet, and internal
+             consistency.
+             * The sreadsheet is specified in the --spec argument.
+
+  reconcile  Validates the spreadsheet, then reconciles with the project
+             directory in Dropbox.
+             * The spreadsheet is specified in the --spec argument.
+             * The ACM or Project name is specified in the --acm argument.
+             * The --dropbox argument specifies the location of the Dropbox
+               directory. Default "~/Dropbox".
+             * The --strategy argument describes how Recipient directory
+               names are created. See --strategy discussion, below.
+             * The --update argument describes what should be updated by the
+               reconcillation process.
+             * The --outdir argument specifies a directory into which output
+               files should be written. Default: current directory.
+             * The --out argument specifies the naming scheme to be used for
+               an updated spreadsheet .xlsx file. See below for more info.
+
+             By default, the reconcile command will analyze the spreadsheet
+             and project directory, but in the absence of an --update
+             argument, will not update anything. Possible updates are:
+             * directories, dirs     Create or update recipient directories.
+             * xdirectories, xdirs   Move obsolete recipient directories to
+                                     /TB-Loaders/archive/retired_communities
+                                     in the project directory.
+             * xlsx                  Update the program spec .xlsx file.
+             * recipientids          Update the recipientids in the .xlsx,
+                                     by computing what they *would* be if
+                                     the corresponding directory existed.
+                                     If directories are created later, this
+                                     recipient id will be used.
+             The update options may be abbreviated to any unambiguous value,
+             so 'd', 'xd', and 'xl' are all valid.
+
+             Considering the community name, group name, and support entity,
+             the strategies for naming directories are:
+             0: {group}   (with non-alphanum -> underscore)
+             1: {community} or {community}-{group} (if there is a group)
+             2: {community} or {group}-{community}
+             3: {community} or {community}-{group} (with non-alpha -> '_')
+
+             Because of upper/lower case and multiple spaces, fuzzy matching
+             is heavily applied to try to find the best matches.
+
+             To manually assign a match, create a recipient id in the
+             directory, and add the recipient id to the recipient row in the
+             program specification .xlsx file.
+
+             When recipient directories are created, they are named by the
+             strategy, but whitespace is translated to '_' and certain file-
+             system-unfriendly characters are eliminated: \*?:&'"
+
+             If a new spreadsheet is created, by default it is named like
+             the input file with '-new' appended to the filename. You can
+             give your own pattern, with the following substitutions:
+             {dir}       The input spreadsheet's directory.
+             {name}      The input spreadsheet's file name.
+             {ext}       The input spreadsheet's extension (.xlsx).
+             {N}         An incrementing number.
+             {outdir}    From the --outdir argument.
+             The default name is {dir}{name}-new{ext}.
+
+  export     Exports .csv files suitable to insert into PostgreSQL. The
+             files are:
+             * deployment_spec.csv   Deployments in the project.
+                 project               Name of project (same on all lines)
+                 deployment_num        Deployment number of given line
+                 startdate             First day of Deployment
+                 enddate               Last day of Deployment
+                 component             Component filter: "east" or "~east"
+             * recipients.csv        Recipients in the project.
+                 recipientid           The globally unique recipientid
+                 project               Name of project (same on all lines)
+                 partner               Partner who owns the project
+                 communityname         Community name of the recipient
+                 groupname             Group name of the recipient
+                 affiliate             Affiliate, if any, supporting Partner
+                 component             Component in which Recipient is member
+                 country               Country of Recipient (geo-poly-0)
+                 region                Between country and district
+                 district              Smallest geographical region
+                 numhouseholds         # hhs in household rotation model
+                 numtbs                # tbs distributed to recipient
+                 supportentity         Who to call with problems, or agent
+                 model                 Distribution model: hhr, group, agent
+                 language              ISO 639-3 code of language
+                 coordinates           (latitude, longitude)
+             * recipients_map.csv    Maps Recipients to Directories.
+                 project               Name of project (same on all lines)
+                 directory             Directory with greeting; used as
+                                       community name in the past
+                 recipientid           The globally unique recipientid
+             * content.csv           The Content Calendar
+                 deployment_num        Deployment number of given line
+                 playlist_title        Subject title (eg, Health)
+                 message_title         Message title
+                 key_points            What does the message try to convey
+                 language              A filter, like "swh" or "~swh"
+                 default_category      Category for import into the ACM
 """
-# file = 'commSpec.xlsx'
-#
-# ProgramSpecReader.options['debug'] = True
-# ps = ProgramSpecReader.load(file)
-# if ps.valid:
-#     program = ps.Program
-#
-#     print(program)
-#     for depl_no, d in program.deployments.items():
-#         #print(d)
-#         m = d.deployment_info
-#         print('Deployment {}, {}, {} recipients'.format(m.name, d, len(m.recipients)))
-#         for (pkg, pkginfo) in m.packages.items():
-#             print('  {}'.format(pkg))
-#             for (playlist, messages) in pkginfo.playlists.items():
-#                 print('      {}'.format(playlist.title))
-#                 for msg in messages:
-#                     print('          {}'.format(msg.title))
-#     for _, c in program.components.items():
-#         print(c)
-#
-# else:
-#     for msg in ps.errors:
-#         print(msg, file=sys.stderr)
+
 
 class store_directory(argparse.Action):
     def __init__(self, option_strings, dest, nargs=None, **kwargs):
@@ -92,6 +144,7 @@ class store_directory(argparse.Action):
 dropbox = ''
 args = {}
 
+
 def cannonical_acm_path_name(acm):
     global dropbox
     acm = acm.upper()
@@ -110,12 +163,13 @@ def cannonical_acm_project_name(acmdir):
         acm = acm[4:]
     return acm
 
+
 # Create a name for a new xlsx file. {outdir}, {dir}, {name}, {ext}, and {N} are substitut
 def new_xlsx_name():
     global args
     fullpath = args.spec
     xls_dir, fn = os.path.split(fullpath)
-    if len(xls_dir)>0 and xls_dir[-1]!='/':
+    if len(xls_dir) > 0 and xls_dir[-1] != '/':
         xls_dir += '/'
     name, ext = os.path.splitext(fn)
     N = ''
@@ -124,12 +178,13 @@ def new_xlsx_name():
         # If the name already ends in a number, remove it from name, and use as a starting point
         if name[-1].isdigit():
             trailing = ''
-            while len(name)>0 and name[-1].isdigit():
+            while len(name) > 0 and name[-1].isdigit():
                 trailing = name[-1:] + trailing
                 name = name[:-1]
             sequence = int(trailing)
         # Find a unique name by incrementing N
-        while Path(os.path.expanduser(args.out.format(outdir=args.outdir, dir=xls_dir, name=name, ext=ext, N=N))).exists():
+        while Path(
+                os.path.expanduser(args.out.format(outdir=args.outdir, dir=xls_dir, name=name, ext=ext, N=N))).exists():
             sequence += 1
             N = str(sequence)
     outpath = os.path.expanduser(args.out.format(outdir=args.outdir, dir=xls_dir, name=name, ext=ext, N=N))
@@ -171,6 +226,7 @@ def do_reconcilation(updates: set):
         if XLSX in updates:
             prog_spec.save_changes(outpath, True)
 
+
 def do_exports():
     global args
     prog_spec = _validate()
@@ -188,8 +244,7 @@ def main():
     updatables = KeyWords(synonyms=UPDATABLES.synonyms, *UPDATABLES.words)
 
     arg_parser = argparse.ArgumentParser(epilog=desc, formatter_class=argparse.RawDescriptionHelpFormatter)
-    arg_parser.add_argument('operation', help='The operation to perform.',
-                            choices=['validate', 'reconcile', 'recipients', 'export'])
+    arg_parser.add_argument('command', choices=['validate', 'reconcile', 'export'])
     arg_parser.add_argument('--spec', '--program-spec', metavar='XLSX',
                             help='Name of the Program Specification spreadsheet.')
     arg_parser.add_argument('--acm', help='Name of the ACM project.')
@@ -198,9 +253,10 @@ def main():
                             const='{dir}{name}-new{ext}', help='Create a new, updated Program Specification. An '
                                                                'optional filename may be specified. Deafult is the '
                                                                'original name with "-new" appended. A format string '
-                                                               'with {outdir}, {dir}, {name}, and {ext} substitutions may be ' 
+                                                               'with {outdir}, {dir}, {name}, and {ext} substitutions may be '
                                                                'supplied.')
-    arg_parser.add_argument('--outdir', action=store_directory, default='.', metavar='DIR', help='Directory for output files (default ".")')
+    arg_parser.add_argument('--outdir', action=store_directory, default='.', metavar='DIR',
+                            help='Directory for output files (default ".")')
     arg_parser.add_argument('--strategy', type=int, default=1,
                             help='What strategy was used in creating directory names?',
                             choices=[0, 1, 2, 3])
@@ -215,8 +271,8 @@ def main():
     if len(updates[2]) > 0:
         errors.err(errors.ambiguous_update, {'items': '", "'.join(updates[2])})
 
-    if len(args.outdir)>0 and args.outdir[-1]!='/':
-        args.outdir = args.outdir+'/'
+    if len(args.outdir) > 0 and args.outdir[-1] != '/':
+        args.outdir = args.outdir + '/'
 
     dropbox = expanduser(args.dropbox)
     print('Using {} for Dropbox.'.format(dropbox))
@@ -225,11 +281,11 @@ def main():
         errors.print_errors()
         return 1
 
-    if args.operation == 'validate':
+    if args.command == 'validate':
         do_validation()
-    elif args.operation == 'reconcile':
+    elif args.command == 'reconcile':
         do_reconcilation(updates[0])
-    elif args.operation == 'export':
+    elif args.command == 'export':
         do_exports()
 
 

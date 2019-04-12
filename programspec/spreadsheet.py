@@ -5,8 +5,10 @@ import traceback
 from openpyxl import load_workbook
 
 from programspec import errors, utils
-from programspec.programspec_constants import GENERAL, CONTENT, DEPLOYMENTS, COMPONENTS, required_sheets, \
-    required_columns, required_data, optional_columns, columns_to_members_map
+from programspec.programspec_constants import GENERAL, CONTENT, DEPLOYMENTS, \
+    COMPONENTS, required_sheets, \
+    required_columns, required_data, optional_columns, columns_to_members_map, \
+    string_columns, column_names_to_member_names
 
 '''
 Interface to Program Specification spreadsheet.
@@ -19,11 +21,6 @@ column_name_to_property_name_map = columns_to_members_map(GENERAL, CONTENT, DEPL
 # { 'num_tbs': '# TBs', ...}
 property_name_to_column_name_map = {v: k for k, v in column_name_to_property_name_map.items()}
 
-
-def xstrip(x):
-    if isinstance(x, str):
-        return x.strip()
-    return x
 
 
 # "Sparse" list used for spreadsheet rows, since "a few" rows on the sheet may be blank (or skipped),
@@ -198,6 +195,15 @@ class Spreadsheet:
         required_cells = required_data.get(sheet_type, None) or required_columns[sheet_type]
         required_cell_indices = [(self._indices[sheet_name][column], column) for column in required_cells]
 
+        # Columns required to be strings.
+        string_cells = column_names_to_member_names(string_columns[sheet_type]).values()
+        def normalize(x, name):
+            if x is not None and name in string_cells and not isinstance(x, str):
+                x = str(x)
+            if isinstance(x, str):
+                return x.strip()
+            return x
+
         # Get the spreadsheet data.
         sh = self._wb[sheet_name]
         # Getting a slice of a single row returns the row, not a list with one element, but we always want a list. So,
@@ -222,7 +228,7 @@ class Spreadsheet:
             if len(missing) == 0 or include_partial_rows:
                 # We have what we need; add to the result.
                 # Build list of [dictionary of {member_name: column.value}]
-                row_dict = {name: (xstrip(row[cell_ix].value) if cell_ix is not None else None) for name, cell_ix in
+                row_dict = {name: (normalize(row[cell_ix].value, name) if cell_ix is not None else None) for name, cell_ix in
                             name_and_ix}
                 row_dict['row_num'] = row_num
                 result.append(row_dict)
@@ -382,7 +388,7 @@ class Spreadsheet:
         for component_name in self._components:
             recipients = self._recipients[component_name]
             for recipient in recipients:
-                key = (recipient['community'].upper(), upr(recipient['group_name']), upr(recipient['support_entity']),
+                key = (upr(recipient['community']), upr(recipient['group_name']), upr(recipient['support_entity']),
                        upr(recipient['language']))
                 if key in recipients_seen:
                     repeat_of = recipients_seen[key]

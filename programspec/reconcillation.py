@@ -191,11 +191,11 @@ class Reconciler:
 
     @property
     def communities_dir(self):
-        return self._acmdir + '/TB-Loaders/communities'
+        return self._recipient_utils.communities_dir #self._acmdir + '/TB-Loaders/communities'
 
     @property
     def retired_communities_dir(self):
-        return self._acmdir + '/TB-Loaders/archive/retired_communities'
+        return self._recipient_utils.retired_communities_dir #self._acmdir + '/TB-Loaders/archive/retired_communities'
 
     # Build a tuple for the recipient's name. Read as "X in Community", where X is group or support entity (CHW, etc)
     def _recip_tuple(self, recip: programspec.Recipient):
@@ -232,7 +232,7 @@ class Reconciler:
         b = tup[1]
         for k in tup[2:]:
             b += '_' + k
-        return (a, b)
+        return a, b
 
         # if recip.model.lower() == 'hhr':
         #     return (recip.community, None)
@@ -298,13 +298,34 @@ class Reconciler:
         print(pathname)
         return pathname
 
+    def _create_recipientid_for_recipient(self, recipient: programspec.Recipient):
+        if recipient.recipient is not None:
+            return
+        directory = self._fmt(self._recip_key(recipient))  # (recipient.community, recipient.group_name))
+        directory = self._normalize_pathname(directory)
+        recipientid = self._recipient_utils.compute_recipientid(directory)
+        if recipientid in self._recipients_by_recipientid_from_spec:
+            errors.err(errors.recipientid_would_collide,
+                       {'recipientid': recipientid,
+                        'community': '{}'.format(self._recip_name(recipient)),
+                        'community2': '{}'.format(self._recip_name(self._recipients_by_recipientid_from_spec[recipientid]))})
+
+        recipient.recipientid = recipientid
+
+    def _create_missing_recipientids(self):
+        # For every component, for every recipient...
+        for component in self._spec.components.values():
+            for recipient in component.recipients:
+                if recipient.recipientid is None:
+                    self._create_recipientid_for_recipient(recipient)
+
     # Given a recipient, create the TB-Loaders/communities/* directory for that recipient. Include languages,
     # system (.grp), and recipient.id file.
     def _create_directory_for_recipient(self, recipient: programspec.Recipient):
         if recipient.directory_name is not None:
             return
 
-        ## RECIP NAME
+        #RECIP_NAME
         # Compute the directory name and full path to the community/group directory
         directory = self._fmt(self._recip_key(recipient))  # (recipient.community, recipient.group_name))
         directory = self._normalize_pathname(directory)
@@ -314,11 +335,12 @@ class Reconciler:
                        {'directory': directory, 'community': '{}'.format(self._recip_name(recipient))})
             return
         # Make the directory structure & create recipient.id for the community/group
+        existing = 'existing ' if recipient.recipientid else ''
         recipientid = self._recipient_utils.create_directory_for_recipient_in_path(recipient, path)
 
-        ## RECIP NAME
-        print('Created directory "{}" for {} with recipientid {}'.format(directory, self._recip_name(recipient),
-                                                                         recipientid))
+        #RECIP_NAME
+        print('Created directory "{}" for {} with {}recipientid {}'.format(directory, self._recip_name(recipient),
+                                                                         existing, recipientid))
         # Update the directories of what's in the TB-Loaders/communities directory
         self._recipientid_by_directory[directory] = recipientid
         self._directory_by_recipientid[recipientid] = directory
@@ -330,7 +352,6 @@ class Reconciler:
         recipient.directory_name = directory
 
     def _create_directories_for_recipients(self):
-        # RECIP NAME
         for community, group in self._unmatched_recipients:
             recipient = self._recipients_by_community_group_from_spec[(community, group)]
             self._create_directory_for_recipient(recipient)
@@ -341,13 +362,11 @@ class Reconciler:
         mark = errors.get_mark()
         directories_to_create = {}
         directory_collisions = {}
-        # RECIP NAME
         for community, group in self._unmatched_recipients:
             recipient = self._recipients_by_community_group_from_spec[(community, group)]
             if recipient.directory_name is not None:  # already has a directory
                 continue
             # Compute the directory name, and check for collisions with existing or to-be-created directories
-            # RECIP NAME
             directory = self._fmt(
                 self._recip_key(recipient)).upper()  # (recipient.community, recipient.group_name)).upper()
             if directory in self._upper_case_directory_names:
@@ -378,11 +397,13 @@ class Reconciler:
         for community_group, directory, _ in self._matches:
             if directory in self._directories_without_recipientid:
                 recipient = self._recipients_by_community_group_from_spec[community_group]
-                recipientid = self._recipient_utils.create_recipient_id_file(directory)
-                print('Created recipient.id in "{}" for {}/{} with recipientid {}'.format(directory,
+                recipientid = recipient.recipientid
+                existing = 'existing ' if recipient.recipientid else ''
+                recipientid = self._recipient_utils.create_recipient_id_file(directory, recipientid)
+                print('Created recipient.id in "{}" for {}/{} with {}recipientid {}'.format(directory,
                                                                                           recipient.community,
                                                                                           recipient.group_name,
-                                                                                          recipientid))
+                                                                                          existing, recipientid))
                 # Update the directories of what's in the TB-Loaders/communities directory
                 self._recipientid_by_directory[directory] = recipientid
                 self._directory_by_recipientid[recipientid] = directory
@@ -413,7 +434,7 @@ class Reconciler:
         directories = os.listdir(self.communities_dir)
         recipient_id_files = {}
         for directory in directories:
-            if not os.path.isdir(self.communities_dir + '/' + directory):
+            if not Path(self.communities_dir, directory).is_dir():
                 continue
             recipient_id_file = self._recipient_utils.read_existing_recipient_id_file(directory)
             if recipient_id_file and 'recipientid' in recipient_id_file:
@@ -703,18 +724,6 @@ class Reconciler:
                           .format(recip_name, recipient.directory_name,
                                   self._directory_by_recipientid[recipientid]))
 
-    def write_deployments_file(self, outdir):
-        deployments_file = Path(outdir, 'deployments.csv')
-        with deployments_file.open(mode='w', newline='\n') as depls:
-            print('project,deployment,deploymentname,deploymentnumber,startdate,enddate,distribution,comment',
-                  file=depls)
-            deployments = {n: self._spec.get_deployment(n) for n in sorted(self._spec.deployment_numbers)}
-            for n, depl in deployments.items():
-                name = '{}-{}-{}'.format(self._spec.project, depl.start_date.year % 100, n)
-                line = [self._spec.project, name, '', str(n), str(depl.start_date.date()), str(depl.end_date.date()),
-                        '', '']
-                print(','.join(line), file=depls)
-
     def reconcile(self):
         # list of directory names, they all start off as unmatched.
         self._unmatched_dirs = set(self.get_community_dirs().keys())
@@ -750,10 +759,8 @@ class Reconciler:
             self._remove_unused_directories()
         if XLSX in self._update:
             self._update_recipients_with_new_matches()
-        if RECIPIENTS in self._update:
-            self._recipient_utils.write_recipients_file(self._outdir)
-            self._recipient_utils.write_recipients_map_file(self._outdir)
-            self.write_deployments_file(self._outdir)
+            if RECIPIENTS in self._update:
+                self._create_missing_recipientids()
 
         return
 

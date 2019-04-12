@@ -5,6 +5,23 @@ import programspec.programspec
 from programspec.recipient_utils import RecipientUtils
 
 
+def write_deployments_file(self, outdir):
+    deployments_file = Path(outdir, 'deployments.csv')
+    with deployments_file.open(mode='w', newline='\n') as depls:
+        print(
+            'project,deployment,deploymentname,deploymentnumber,startdate,enddate,distribution,comment',
+            file=depls)
+        deployments = {n: self._spec.get_deployment(n) for n in
+                       sorted(self._spec.deployment_numbers)}
+        for n, depl in deployments.items():
+            name = '{}-{}-{}'.format(self._spec.project,
+                                     depl.start_date.year % 100, n)
+            line = [self._spec.project, name, '', str(n),
+                    str(depl.start_date.date()), str(depl.end_date.date()),
+                    '', '']
+            print(','.join(line), file=depls)
+
+
 def write_deployments_csv_file(progspec: programspec, outdir: Path):
     '''
     Writes the deployments from the given ProgramSpec to a .csv file in the given directory.

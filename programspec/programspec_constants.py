@@ -52,7 +52,7 @@ required_columns = {
     'recipient': [AFFILIATE, PARTNER, COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, AGENT,
                   POPULATION, NUM_HOUSEHOLDS, NUM_TBS, SUPPORT_ENTITY, MODEL, LANGUAGE]
 }
-# Only these columns in the given sheet is required to have data.
+# Only these columns in the given sheet is *required* to have data. The column is still required, but can be blank.
 required_data = {
     CONTENT: [DEPLOYMENT_NO, PLAYLIST_TITLE, MESSAGE_TITLE, KEY_POINTS],
     DEPLOYMENTS: [DEPLOYMENT_NO, START_DATE, END_DATE],
@@ -64,20 +64,38 @@ optional_columns = {
     DEPLOYMENTS: [COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, MODEL, LANGUAGE, TAG],
     'recipient': [RECIPIENTID, DIRECTORY_NAME, TAG, TALKINGBOOKID]
 }
+# These columns are coerced to str() when loaded from the spreadsheet.
+string_columns = {
+    GENERAL: [PARTNER, PROGRAM],
+    CONTENT: [PLAYLIST_TITLE, MESSAGE_TITLE, KEY_POINTS, DEFAULT_CATEGORY, LANGUAGE, TAG],
+    DEPLOYMENTS: [COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, MODEL, LANGUAGE, TAG],
+    COMPONENTS: [COMPONENT],
+    'recipient': [AFFILIATE, PARTNER, COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, AGENT,
+                   SUPPORT_ENTITY, MODEL, LANGUAGE, RECIPIENTID, DIRECTORY_NAME, TAG, TALKINGBOOKID]
+}
 
 # build a map between the spreadsheet column names and valid member names, 'Group Name' -> 'group_name', '# TBs' -> 'num_tbs'
+
+def column_names_to_member_names(column_names):
+    result = {}
+    for column_name in column_names:
+        member_name = column_name.replace(' ', '_').replace('#', 'num').lower()
+        result[column_name] = member_name
+    return result
 
 def columns_to_members_map(*sheet_names):
     result = {}
     for sheet_name in sheet_names:
         if sheet_name in required_columns:
-            for column_name in required_columns[sheet_name]:
-                tuple_name = column_name.replace(' ', '_').replace('#', 'num').lower()
-                result[column_name] = tuple_name
+            result.update(column_names_to_member_names(required_columns[sheet_name]))
+            # for column_name in required_columns[sheet_name]:
+            #     tuple_name = column_name.replace(' ', '_').replace('#', 'num').lower()
+            #     result[column_name] = tuple_name
         if sheet_name in optional_columns:
-            for column_name in optional_columns[sheet_name]:
-                tuple_name = column_name.replace(' ', '_').replace('#', 'num').lower()
-                result[column_name] = tuple_name
+            result.update(column_names_to_member_names(optional_columns[sheet_name]))
+            # for column_name in optional_columns[sheet_name]:
+            #     tuple_name = column_name.replace(' ', '_').replace('#', 'num').lower()
+            #     result[column_name] = tuple_name
     return result
 
 # If a column name changes, above, change it here, AND CHANGE USES IN THE CODE!
@@ -144,5 +162,5 @@ del check_names
 DIRECTORIES = 'directories'
 XDIRECTORIES = 'xdirectories'
 XLSX = 'xlsx'
-RECIPIENTS = 'recipients'
-UPDATABLES = JsObject({'words': [DIRECTORIES, XLSX, RECIPIENTS, XDIRECTORIES], 'synonyms': {'csvs': RECIPIENTS, 'recips': RECIPIENTS, 'dirs': DIRECTORIES, 'xdirs': XDIRECTORIES}})
+RECIPIENTS = 'recipientids'
+UPDATABLES = JsObject({'words': [DIRECTORIES, XLSX, RECIPIENTS, XDIRECTORIES], 'synonyms': {'dirs': DIRECTORIES, 'xdirs': XDIRECTORIES}})
