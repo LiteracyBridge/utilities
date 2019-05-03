@@ -31,18 +31,21 @@ def write_deployments_csv_file(progspec: programspec, outdir: Path):
     :param outdir: Path -- the path into which to write the .csv file.
     :return: None
     '''
-    deployments_file = Path(outdir, 'deployment_spec.csv')
-    with deployments_file.open(mode='w', newline='', encoding='utf-8-sig') as csvfile:
+    deployment_spec_file = Path(outdir, 'deployment_spec.csv')
+    with deployment_spec_file.open(mode='w', newline='', encoding='utf-8-sig') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
-        csvwriter.writerow(['project', 'deployment_num', 'startdate', 'enddate', 'component'])
+        csvwriter.writerow(['project', 'deployment_num', 'startdate', 'enddate', 'component', 'name'])
         # Sort the deployments by number, for the human readers.
         for deployment_no in sorted(progspec.deployment_numbers):
             deployment = progspec.get_deployment(deployment_no)
+            name = '{}-{}-{}'.format(progspec.project,
+                                     deployment.start_date.year % 100, deployment_no)
+
             # Get the component filter, if there is one, and make it printable.
             component_filter = deployment.filter('component')
             component_filter = str(component_filter) if component_filter else ''
             line = [progspec.project, deployment_no, str(deployment.start_date.date()),
-                    str(deployment.end_date.date()), component_filter]
+                    str(deployment.end_date.date()), component_filter, name]
             csvwriter.writerow(line)
 
 

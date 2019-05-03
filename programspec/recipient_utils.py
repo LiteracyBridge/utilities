@@ -29,11 +29,13 @@ class RecipientUtils:
     def write_recipients_file(self, outdir):
         columns = ['recipientid', 'project', 'partner', 'communityname', 'groupname', 'affiliate',
                    'component', 'country', 'region', 'district', 'numhouseholds', 'numtbs',
-                   'supportentity', 'model', 'language', 'coordinates']
+                   'supportentity', 'model', 'language', 'coordinates', 'agent', 'latitude', 'longitude']
         computed_props = {'project': lambda:self._spec.project,
-                          'coordinates': lambda:None}
+                          'coordinates': lambda:None,
+                          'latitude': lambda:None,
+                          'longitude': lambda:None}
         numeric_props = {'numhouseholds', 'numtbs'}
-        coordinate_props = {'coordinates'}
+        coordinate_props = {'coordinates', 'latitude', 'longitude'}
         property_map = {'communityname':'community', 'groupname':'group_name',
                         'numhouseholds':'num_hh', 'numtbs':'num_tbs',
                         'supportentity':'support_entity'}

@@ -18,6 +18,8 @@ severity = {FATAL: 'Fatal errors',
 duplicate_columns = (FATAL, 100, 'Column "{column}" appears multiple times in sheet "{sheet}".')
 missing_sheet = (FATAL, 101, 'Workbook is missing sheet "{sheet}".')
 
+missing_directory = (FATAL, 200, 'Directory is missing: "{directory}"')
+
 unknown_update = (FATAL, 400, 'Unknown item(s) to update: "{items}".')
 ambiguous_update = (FATAL, 401, 'Ambiguous item(s) to update: "{items}" -- use longer word')
 generic_fatal = (FATAL, 499, '{message}')
@@ -30,6 +32,7 @@ missing_deployment_numbers = (ERROR, 511,  '#(s) {missing} missing from list in 
 duplicate_deployment_numbers = (ERROR, 512, 'Deployment(s) # {duplicates} appears multiple times in Deployments')
 deployment_start_after_end = (ERROR, 513, 'Start date "{start}" is >= end date "{end}" in deployment # {deployment}.')
 deployment_lt_zero = (ERROR, 514, 'Deployment # may not be less than 0: {deployment}.')
+no_deployments = (ERROR, 515, 'There are no Deployments in the Program Specification.')
 
 message_unknown_deployment = (ERROR, 550, 'Message #{row} refers to unknown deployment "{deployment}": {title}.')
 
@@ -55,8 +58,7 @@ def error(definition: tuple, args: dict = None):
     severity, code, fmt = definition
     if _severity == None or severity < _severity:
         _severity = severity
-    if args is not None:
-        message = fmt.format(**args)
+    message = fmt.format(**args) if args is not None else fmt
     _errors.append((severity, code, message))
 
 def has_fatal():

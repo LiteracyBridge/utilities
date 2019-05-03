@@ -343,7 +343,10 @@ class Spreadsheet:
                 self._deployments[deployment_row.deployment_num] = (
                     deployment_row.start_date, deployment_row.end_date, filters)
 
-        self._no_missing(self._deployments, range(min(depl_numbers), max(depl_numbers) + 1),
+        if len(depl_numbers) == 0:
+            self.err(errors.no_deployments)
+        else:
+            self._no_missing(self._deployments, range(min(depl_numbers), max(depl_numbers) + 1),
                          errors.missing_deployment_numbers)
         # if min_deployment > 1:
         #     self.err('Deployments should start at 1, not "{}"'.format(min_deployment))

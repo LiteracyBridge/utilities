@@ -190,17 +190,20 @@ def new_xlsx_name():
     outpath = os.path.expanduser(args.out.format(outdir=args.outdir, dir=xls_dir, name=name, ext=ext, N=N))
     return outpath
 
+def _print_errors(from_mark = None):
+    previous_severity = -1
+    for error in errors.get_errors(mark=from_mark):
+        if error[0] != previous_severity:
+            previous_severity = error[0]
+            print('{}:'.format(errors.severity[error[0]]))
+        print('  {}: {}'.format(error[1], error[2]))
+
 
 def _validate():
     global args
     file = expanduser(args.spec)
     ps = spreadsheet.load(file)
-    previous_severity = -1
-    for error in errors.get_errors():
-        if error[0] != previous_severity:
-            previous_severity = error[0]
-            print('{}:'.format(errors.severity[error[0]]))
-        print('  {}: {}'.format(error[1], error[2]))
+    _print_errors()
     if not errors.has_error():
         return programspec.get_program_spec_from_spreadsheet(ps, cannonical_acm_project_name(args.acm))
 
@@ -219,12 +222,14 @@ def do_reconcilation(updates: set):
     prog_spec = _validate()
     outpath = None
     if prog_spec:
+        mark = errors.get_mark()
         if args.out is not None:
             outpath = new_xlsx_name()
         acmdir = cannonical_acm_path_name(args.acm)
         reconcillation.reconcile(acmdir, prog_spec, args.strategy, update=updates, outdir=args.outdir)
         if XLSX in updates:
             prog_spec.save_changes(outpath, True)
+        _print_errors(mark)
 
 
 def do_exports():

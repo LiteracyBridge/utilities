@@ -725,6 +725,11 @@ class Reconciler:
                                   self._directory_by_recipientid[recipientid]))
 
     def reconcile(self):
+        # We can't reconcile the recipients if the directory doesn't even exist.
+        if not self.communities_dir.exists() or not self.communities_dir.is_dir():
+            errors.err(errors.missing_directory, {'directory': self.communities_dir})
+            return
+
         # list of directory names, they all start off as unmatched.
         self._unmatched_dirs = set(self.get_community_dirs().keys())
         # list of (community, group_name) tuples
