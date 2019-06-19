@@ -1,5 +1,5 @@
 """
-checkout.py
+checkout.py 2019-06-18
 
 An AWS lambda function that handles ACM checkout requests.
 Processes POST requests sent to API Gateway ('ACMCheckOut' API) from the java ACM checkout program.
