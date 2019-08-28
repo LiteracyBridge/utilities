@@ -10,7 +10,7 @@ from programspec import errors, programspec
 from programspec.programspec_constants import DIRECTORIES, XDIRECTORIES, XLSX, RECIPIENTS
 from programspec.recipient_utils import RecipientUtils
 
-# In this module is it very useful to refer to recipients by (community, group). For that purpose,
+# In this module is it very useful to refer to recipients by (community, group, agent). For that purpose,
 # we use the term "community_group".
 #
 # Please be consistent here.
@@ -28,11 +28,18 @@ def _recip_key(comm_or_recip, group_or_none: None, se_or_none: None):
 def ufuzz(left, right):
     return fuzz.ratio(left.upper(), right.upper())
 
+def format_cga(cga):
+    '''  community  /group (if group) /agent (if agent) '''
+    s = cga[0]
+    s = s + ('/' + cga[1] if cga[1] else '')
+    s = s + ('/' + cga[2] if cga[2] else '')
+    return s
+
 
 class FuzzyDirectoryMatcher:
     def __init__(self, reconciler):
         self._reconciler = reconciler
-        # formats a recip (community, group) as a string
+        # formats a recip (community, group, agent) as a string
         self._fmt = reconciler._fmt
 
     # Sets values used outside of the walk function.
@@ -101,9 +108,9 @@ class FuzzyDirectoryMatcher:
         # convenience shortcuts
         fmt = lambda r: '{}/{}'.format(r[0], r[1])
         matched = lambda d, r, s: print(
-            '  {:{lw}} {:{rw}} ({}% match)'.format('{}/{}'.format(r[0], r[1]), d, s, lw=lw, rw=rw))
+            '  {:{lw}} {:{rw}} ({}% match)'.format(format_cga(r), d, s, lw=lw, rw=rw))
         advanced_dirs = lambda d: print('  {:{lw}} {:{rw}}'.format('', d, lw=lw, rw=rw))
-        advanced_recips = lambda r: print('  {:{lw}} {:{rw}}'.format('{}/{}'.format(r[0], r[1]), '', lw=lw, rw=rw))
+        advanced_recips = lambda r: print('  {:{lw}} {:{rw}}'.format(format_cga(r), '', lw=lw, rw=rw))
 
         cghead = '{} Community/Groups'.format(len(self.recips))
         dirhead = '{} Directories'.format(len(self.dirs))
@@ -128,6 +135,13 @@ class Reconciler:
             grp = '-' + r[1] if r[1] else ''
             return _file_substitutions.sub('_', r[0] + grp)
 
+        def _strategy4(r):
+            # community {-group_or_community_worker}
+            name = r[0]
+            name += ('-'+r[1]) if r[1] else ''
+            name += ('-'+r[2]) if r[2] else ''
+            return _file_substitutions.sub('_', name)
+
         self._acmdir = acmdir
         self._spec = spec
         self._update = update
@@ -136,7 +150,7 @@ class Reconciler:
         self._recipient_utils = RecipientUtils(spec, acmdir)
 
         self._unmatched_dirs = set()
-        # set of {(community, group)}
+        # set of {(community, group, agent)}. Initialized from program spec, ideally there will be a directory matching each one.
         self._unmatched_recipients = set()
 
         # dictionary of {directory : recipientid}
@@ -157,12 +171,12 @@ class Reconciler:
         self._recipients_by_recipientid_from_spec = {}
         # dictionary of {directory : Recipient}, from the Program Specification
         self._recipients_by_directory_from_spec = {}
-        # dictionary of {(community, group) : Recipient }, from the Program Specification
+        # dictionary of {(community, group, agent) : Recipient }, from the Program Specification
         self._recipients_by_community_group_from_spec = {}
         # dictionary of {community : [Recipient,...]} from the Program Specification
         self._recipients_by_community_from_spec = {}
 
-        # list of [(recipient, directory, score)], where recipient is (community, group)
+        # list of [(recipient, directory, score)], where recipient is (community, group, agent)
         self._matches = []
         # set of communities with at least one matched directory
         self._matched_communities = set()
@@ -172,7 +186,9 @@ class Reconciler:
         self._joiner = '-'
         # How the community and group names were *usually* joined into directory names.
         self._strategy = strategy
-        if strategy == 3:
+        if strategy == 4:
+            self._fmt = _strategy4
+        elif strategy == 3:
             self._fmt = _strategy3
         elif strategy == 2:
             self._fmt = lambda r: '{}{}{}'.format(r[1] if r[1] else '', '-' if r[1] else '', r[0])
@@ -199,40 +215,42 @@ class Reconciler:
 
     # Build a tuple for the recipient's name. Read as "X in Community", where X is group or support entity (CHW, etc)
     def _recip_tuple(self, recip: programspec.Recipient):
-        keys = [recip.community]
-        if recip.model.lower() == 'hhr':
-            keys.append(None)
-        elif recip.model.lower() == 'group':
-            keys.append(recip.group_name)
-        else:
-            # community worker model?
-            # If the _recipients_by_community_from_spec hasn't yet been initialized, this will give an empty list
-            # of recipients. We'll "all(...)" will be true because none are false.
-            community_recipients = self._recipients_by_community_from_spec.get(recip.community, [])
-            agent = None
-            # Is there a "group_name", and is it unique? If so, use that for agent.
-            # Otherwise try with support_entity.
-            # Otherwise concat group_name, support_entity, and model.
-            if recip.group_name and all([r == recip or recip.group_name != r.group_name for r in community_recipients]):
-                keys.append(recip.group_name)
-            elif recip.support_entity and all(
-                    [r == recip or recip.support_entity != r.support_entity for r in community_recipients]):
-                keys.append(recip.support_entity)
-            else:
-                keys.append(recip.model)
-                if recip.group_name:
-                    keys.append(recip.group_name)
-                if recip.support_entity:
-                    keys.append(recip.support_entity)
-        return tuple(keys)
+        return (recip.community, recip.group_name, recip.agent)
+        # keys = [recip.community]
+        # if recip.model.lower() == 'hhr':
+        #     keys.append(None)
+        # elif recip.model.lower() == 'group':
+        #     keys.append(recip.group_name)
+        # else:
+        #     # community worker model?
+        #     # If the _recipients_by_community_from_spec hasn't yet been initialized, this will give an empty list
+        #     # of recipients. We'll "all(...)" will be true because none are false.
+        #     community_recipients = self._recipients_by_community_from_spec.get(recip.community, [])
+        #     agent = None
+        #     # Is there a "group_name", and is it unique? If so, use that for agent.
+        #     # Otherwise try with support_entity.
+        #     # Otherwise concat group_name, support_entity, and model.
+        #     if recip.group_name and all([r == recip or recip.group_name != r.group_name for r in community_recipients]):
+        #         keys.append(recip.group_name)
+        #     elif recip.support_entity and all(
+        #             [r == recip or recip.support_entity != r.support_entity for r in community_recipients]):
+        #         keys.append(recip.support_entity)
+        #     else:
+        #         keys.append(recip.model)
+        #         if recip.group_name:
+        #             keys.append(recip.group_name)
+        #         if recip.support_entity:
+        #             keys.append(recip.support_entity)
+        # return tuple(keys)
 
     def _recip_key(self, recip: programspec.Recipient):
-        tup = self._recip_tuple(recip)
-        a = tup[0]
-        b = tup[1]
-        for k in tup[2:]:
-            b += '_' + k
-        return a, b
+        return self._recip_tuple(recip)
+        # tup = self._recip_tuple(recip)
+        # a = tup[0]
+        # b = tup[1]
+        # for k in tup[2:]:
+        #     b += '_' + k
+        # return a, b
 
         # if recip.model.lower() == 'hhr':
         #     return (recip.community, None)
@@ -246,7 +264,8 @@ class Reconciler:
         tup = self._recip_tuple(recip)
         name = tup[0]
         for k in tup[1:]:
-            name += '/' + k
+            if k is not None:
+                name += '/' + k
         return name
         #
         # if recip.model.lower() == 'hhr':
@@ -352,8 +371,8 @@ class Reconciler:
         recipient.directory_name = directory
 
     def _create_directories_for_recipients(self):
-        for community, group in self._unmatched_recipients:
-            recipient = self._recipients_by_community_group_from_spec[(community, group)]
+        for community, group, agent in self._unmatched_recipients:
+            recipient = self._recipients_by_community_group_from_spec[(community, group, agent)]
             self._create_directory_for_recipient(recipient)
 
     # Checks whether any of the directories that we would create would cause collisions.
@@ -362,8 +381,8 @@ class Reconciler:
         mark = errors.get_mark()
         directories_to_create = {}
         directory_collisions = {}
-        for community, group in self._unmatched_recipients:
-            recipient = self._recipients_by_community_group_from_spec[(community, group)]
+        for community, group, agent in self._unmatched_recipients:
+            recipient = self._recipients_by_community_group_from_spec[(community, group, agent)]
             if recipient.directory_name is not None:  # already has a directory
                 continue
             # Compute the directory name, and check for collisions with existing or to-be-created directories
@@ -507,18 +526,22 @@ class Reconciler:
         self._recipients_by_community_group_from_spec = community_groups
         return community_groups
 
+##
+## group -> (group, agent)
+##
     # For each community, a list of unmatched groups. Built from unmatched_recipients.
-    def unmatched_groups_by_community(self):
-        unmatched_groups = {}
+    # { community : [ (group, agent), ...]}
+    def unmatched_ga_s_by_community(self):
+        unmatched_ga_s = {}
         # List of unique community names, with a list of groups for each
-        for community, group in self._unmatched_recipients:
+        for community, group, agent in self._unmatched_recipients:
             if community is None:
                 print("well, that's unexpected")
-            if community in unmatched_groups:
-                unmatched_groups[community].append(group)
+            if community in unmatched_ga_s:
+                unmatched_ga_s[community].append((group, agent))
             else:
-                unmatched_groups[community] = [group]
-        return unmatched_groups
+                unmatched_ga_s[community] = [(group, agent)]
+        return unmatched_ga_s
 
     # Given a recipient and a directory, and optional score, record the match.
     # Remove the recipient and directory from unmatched lists.
@@ -539,7 +562,7 @@ class Reconciler:
         if len([r for r, d, s in self._matches if s != 'recipientid']) == 0:
             print('  All match by recipientid.')
             return
-        print_data = [('{}/{}'.format(r[0], r[1]), d, s) for r, d, s in self._matches]
+        print_data = [(format_cga(r), d, s) for r, d, s in self._matches]
         rw = max(len(r) for r, d, s in print_data)
         dw = max(len(d) for r, d, s in print_data)
         for r, d, s in sorted(print_data, key=lambda x: x[0]):
@@ -548,7 +571,7 @@ class Reconciler:
 
     # Prints the unmatched community/groups, with the groups that DO match, plus the model, if a group is None.
     def print_unmatched(self):
-        unmatched_groups = self.unmatched_groups_by_community()
+        unmatched_groups = self.unmatched_ga_s_by_community()
         if len(unmatched_groups) == 0:
             print('No unmatched communities.')
             return
@@ -572,55 +595,74 @@ class Reconciler:
                     model = ''
                 print('    {} {}'.format(u, model))
 
-    # Given a community, a list of directories containing that community name, the groups
+    # Given a community, a list of directories containing that community name, the (group,agent)s
     # of the community, and the fuzzy match ratios, perform fuzzy matching on the
     # directories and community/group names.
     #
-    # Return a dictionary of { group: {dir: fuzzy_match_ratio, ...}, ...}
-    def get_fuzzy_community_match_ratios(self, community, groups, dirs):
+    # Return a dictionary of { (group,agent): {dir: fuzzy_match_ratio, ...}, ...}
+    def get_fuzzy_community_match_ratios(self, community, ga_s, dirs):
         ratios = {}
         # For each group in the community...
-        for group in groups:
-            group_name = group if group else ''
-            test = self._fmt((community, group_name)).strip().upper()
+        for ga in ga_s:
+            test = self._fmt((community, ga[0], ga[1])).strip().upper()
             # test = '{} {}'.format(community, group_name).strip().upper()
-            ratios[group] = {}
+            ratios[ga] = {}
             # ...make a fuzzy match test with every directory that matched the community
             for d in dirs:
-                ratios[group][d] = fuzz.ratio(test, d.upper())
+                ratios[ga][d] = fuzz.ratio(test, d.upper())
         return ratios
 
     # Given a community, a list of directories containing that community name, the groups
     # of the community, and the fuzzy match ratios, print them out in a nice table.
     @staticmethod
-    def print_fuzzy_community_match_ratios(ratios, community, groups, dirs, matches):
+    def print_fuzzy_community_match_ratios(ratios, community, ga_s, dirs, matches):
+        '''
+        :param ratios: { (group, agent) : {candidate_directory : match_score} }
+        :param community: str
+        :param ga_s: [ (group, agent), ...]
+        :param potential_dirs: [ potential_dir, ...]
+        :return: (num_matches, [((group, agent), directory), ...])
+        '''
+        def _name(ga):
+            name = ga[0] if ga[0] else ''
+            name += (('-' if ga[0] else '') + ga[1]) if ga[1] else ''
+            name = '-' if not name else name
+            return name
+
         dir_name_width = 20
         for d in dirs:
             dir_name_width = max(dir_name_width, len(d))
         # Print the results, header line first
         print('Community \'{}\'\ndir{:>{width}s}'.format(community, 'group ->', width=dir_name_width - 4), end=' | ')
-        for group in groups:
-            group_label = group if group else '-'
+        for ga in ga_s:
+            group_label = _name(ga)
             width = max(len(group_label), 4)
             print('{:^{width}}'.format(group_label, width=width), end=' | ')
         print()
         for d in dirs:
             print('{:>{width}s}'.format(d, width=dir_name_width), end=' | ')
-            for group in groups:
-                group_name = group if group else ''
+            for ga in ga_s:
+                group_name = _name(ga)
                 width = max(len(group_name), 4)
-                score = '{}{}'.format(ratios[group][d], '*' if (group, d) in matches else ' ')
+                score = '{}{}'.format(ratios[ga][d], '*' if (ga, d) in matches else ' ')
                 print('{:^{width}}'.format(score, width=width), end=' | ')
             print()
         print()
 
     # Given a set of fuzzy matches for a community, its groups, and matching dirs,
     # remove any matches that are "good enough"
-    def make_fuzzy_community_matches(self, ratios, community, groups, potential_dirs):
+    def make_fuzzy_community_matches(self, ratios, community, ga_s, potential_dirs):
+        '''
+        :param ratios: { (group, agent) : {candidate_directory : match_score} }
+        :param community: str
+        :param ga_s: [ (group, agent), ...]
+        :param potential_dirs: [ potential_dir, ...]
+        :return: (num_matches, [((group, agent), directory), ...])
+        '''
         matches = []
         n_removed = 0
-        for group in groups:
-            scores = ratios[group]
+        for ga in ga_s:
+            scores = ratios[ga]
             # Find the best scoring directory for this group
             best_score, best_dir = -1, None
             for potential_dir in potential_dirs:
@@ -630,13 +672,13 @@ class Reconciler:
             if best_score > self._threshold:
                 # See if this is the best scoring group for the directory
                 best = True
-                for dirs_group in groups:
-                    if dirs_group != group and ratios[dirs_group][best_dir] >= best_score:
+                for dirs_ga in ga_s:
+                    if dirs_ga != ga and ratios[dirs_ga][best_dir] >= best_score:
                         best = False
                         break
                 if best:
-                    matches.append((group, best_dir))
-                    recip = (community, group)
+                    matches.append((ga, best_dir))
+                    recip = (community, ga[0], ga[1])
                     self.remove_matched(recip, best_dir, best_score)
                     n_removed = n_removed + 1
 
@@ -648,10 +690,11 @@ class Reconciler:
     # of community / group to the directory name, and match the ones that are "good enough".
     def make_community_matches(self):
         n_removed = 0
-        unmatched_groups = self.unmatched_groups_by_community()
+        # { community : [ (group, agent), ...]}
+        unmatched_ga_s = self.unmatched_ga_s_by_community()
 
         # For each distinct community... (sorted so it is same run-to-run, for easier debugging)
-        for community, groups in sorted(unmatched_groups.items(), key=lambda c: c):
+        for community, ga_s in sorted(unmatched_ga_s.items(), key=lambda c: c):
             dirs = []
             # find the dirs containing that community name.
             for unmatched_dir in self._unmatched_dirs:
@@ -659,10 +702,11 @@ class Reconciler:
                     dirs.append(unmatched_dir)
 
             if len(dirs) > 0:
-                ratios = self.get_fuzzy_community_match_ratios(community, groups, dirs)
-                removed, matches = self.make_fuzzy_community_matches(ratios, community, groups, dirs)
+                # { (group, agent) : {candidate_directory : match_score} }
+                ratios = self.get_fuzzy_community_match_ratios(community, ga_s, dirs)
+                removed, matches = self.make_fuzzy_community_matches(ratios, community, ga_s, dirs)
                 n_removed = n_removed + removed
-                self.print_fuzzy_community_match_ratios(ratios, community, groups, dirs, matches)
+                self.print_fuzzy_community_match_ratios(ratios, community, ga_s, dirs, matches)
 
         return n_removed
 
@@ -689,7 +733,7 @@ class Reconciler:
                 n_removed = n_removed + 1
                 continue
 
-            (community, group) = recip
+            (community, group, agent) = recip
             if group:
                 test = '{}{}{}'.format(community, self._joiner, group)
                 if examine(test):

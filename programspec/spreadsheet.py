@@ -64,6 +64,8 @@ class Spreadsheet:
         self._components = None
         # Map of of { component_name : [Recipient, ...] }
         self._recipients = None
+        # Recipient ids that we've seen. Its an error if there are duplicates.
+        self._recipientids = set()
         # Array by deployment of array by playlist of content
         self._content = None
 
@@ -95,6 +97,10 @@ class Spreadsheet:
     @property
     def content(self):
         return self._content
+
+    @property
+    def recipientids(self):
+        return self._recipientids
 
     # Save the data to the given file.
     def save(self, filename):
@@ -206,12 +212,18 @@ class Spreadsheet:
 
         # Get the spreadsheet data.
         sh = self._wb[sheet_name]
+        result = []
+
         # Getting a slice of a single row returns the row, not a list with one element, but we always want a list. So,
         # get a slice of one more than we want, which will always be a list, then slice that down to what we do want.
+        #
+        # But, if there is only one row (the header, with no content), we can't get it in a list. So, detect that
+        # and return the empty list.
+        if sh.max_row == 1:
+            return result
+        
         raw_rows = sh[2:sh.max_row + 1]
         raw_rows = raw_rows[0:len(raw_rows) - 1]
-
-        result = []
 
         # Finally ready to gather the actual data.
         for ix in range(0, len(raw_rows)):
@@ -391,13 +403,19 @@ class Spreadsheet:
         for component_name in self._components:
             recipients = self._recipients[component_name]
             for recipient in recipients:
-                key = (upr(recipient['community']), upr(recipient['group_name']), upr(recipient['support_entity']),
+                recipientid = recipient['recipientid'] if 'recipientid' in recipient else None
+                if recipientid:
+                    if recipientid in self._recipientids:
+                        self.err(errors.duplicate_recipientids, {'recipientid': recipientid})
+                    else:
+                        self._recipientids.add(recipientid)
+                key = (upr(recipient['community']), upr(recipient['group_name']), upr(recipient['agent']),
                        upr(recipient['language']))
                 if key in recipients_seen:
                     repeat_of = recipients_seen[key]
                     args = {'community': recipient['community'], 'group': recipient['group_name'],
                             'component': component_name, 'row': recipient['row_num'],
-                            'support_entity': recipient['support_entity'],
+                            'agent': recipient['agent'],
                             'component2': repeat_of['component'], 'row2': repeat_of['row_num']}
                     self.warn(errors.repeated_community_group, args)
                 else:

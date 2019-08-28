@@ -1,5 +1,6 @@
 import hashlib
 import os
+import random
 from pathlib import Path
 
 import programspec.programspec
@@ -21,6 +22,9 @@ class RecipientUtils:
     # Given a string, compute a secure hash, truncate to a friendlier length.
     @staticmethod
     def compute_id(string):
+        # Uncomment next line to add some salt ⃰ to the string.
+        #   ⃰yes, it's not really salt, because we don't save it per recipient. It simply adds some randomness.
+        #string += str(random.random())
         str_hash = hashlib.sha1(string.encode('utf-8'))
         digx = str_hash.hexdigest()
         id16 = digx[:16]
@@ -59,16 +63,23 @@ class RecipientUtils:
                     v = '""'
             elif type(v) != str:
                 v = str(v)
+            elif ',' in v:
+                v = '"' + v + '"'
 
             return v
 
         recipients = Path(outdir, 'recipients.csv')
         with recipients.open(mode='w', newline='\n') as r:
+            # with recipients.open(mode='w', newline='') as csvfile:
+            #     csvwriter = csv.writer(csvfile, delimiter=',', quoting=csv.QUOTE_NONNUMERIC)
+            #     csvwriter.writerow(columns)
+
             print(','.join(columns), file=r)
             for component in self._spec.components.values():
                 for recipient in component.recipients:
                   if recipient.recipientid:
                     props = [val(c, recipient) for c in columns]
+                    # csvwriter.writerow(props)
                     line = ','.join(props)
                     print(line, file=r)
 

@@ -36,6 +36,8 @@ no_deployments = (ERROR, 515, 'There are no Deployments in the Program Specifica
 
 message_unknown_deployment = (ERROR, 550, 'Message #{row} refers to unknown deployment "{deployment}": {title}.')
 
+duplicate_recipientids = (ERROR, 600, 'Duplicate recipientid "{recipientid}".')
+
 community_directory_exists = (ERROR, 800, 'Directory "{directory}" already exists; can\'t use it for "{community}".')
 community_directory_would_collide = (ERROR, 801, 'Directory "{directory}" would collide; can\'t use it for "{communities}".')
 recipientid_would_collide = (ERROR, 802, 'Recipientid "{recipientid}" already for "{community2}"; can\'t use it for "{community}".')
@@ -44,7 +46,7 @@ validation_exception = (ERROR, 900, 'Exception attempting to validate Program Sp
 generic_issue = (ERROR, 999, '{message}')
 
 # warnings - something may be wrong, or at least unusual
-repeated_community_group = (ISSUE, 1000, 'Repeated community/group "{community}/{group}/{support_entity} in {component} (row {row}), already seen in Component "{component2}" (row {row2}).')
+repeated_community_group = (ISSUE, 1000, 'Repeated community/group "{community}/{group}/{agent} in {component} (row {row}), already seen in Component "{component2}" (row {row2}).')
 incorrect_component = (ISSUE, 1001, 'Incorrect Component in community/group "{community}/{group}" (row {row}): "{incorrect}" should be "{component}"')
 
 missing_sheet_values = (ISSUE, 1010, 'Missing value for "{columns}" in sheet "{sheet}", row {row}.')
@@ -72,6 +74,11 @@ def has_issue():
 
 def get_severity():
     return _severity
+
+def reset():
+    global _errors, _severity
+    _errors = []
+    _severity = NO_ISSUE
 
 def get_errors(severity=None, mark=None):
     start = 0 if mark is None else mark[0]

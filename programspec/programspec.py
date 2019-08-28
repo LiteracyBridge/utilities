@@ -1,15 +1,16 @@
 import copy
+import re
 from collections import OrderedDict
 
-from programspec.spreadsheet import Spreadsheet
 from programspec.programspec_constants import columns_to_members_map, TAG
+from programspec.spreadsheet import Spreadsheet
 
 RECIPIENT_FIELDS = set(columns_to_members_map('recipient').values())
 RECIPIENT_FIELDS.add('row_num')
 
 
 # The ProgramSpec.Program that this Reader read. If any.
-def get_program_spec_from_spreadsheet(spreadsheet : Spreadsheet, acm=None):
+def get_program_spec_from_spreadsheet(spreadsheet: Spreadsheet, acm=None):
     if not spreadsheet.ok:
         return None
     partner = spreadsheet.general_info['partner']
@@ -26,7 +27,7 @@ def get_program_spec_from_spreadsheet(spreadsheet : Spreadsheet, acm=None):
         deployment = program.get_deployment(js_message.deployment_num)
         playlist = deployment.get_playlist(js_message.playlist_title)
         playlist.add_message(js_message.message_title, js_message.key_points, js_message.default_category,
-                             js_message.filters)
+                             js_message.sdg_goals, js_message.sdg_targets, js_message.filters)
 
     return program
 
@@ -63,6 +64,7 @@ class Program:
         self.components = {}
 
         self._reader = reader
+        self._recipientids = set()
         self.partner = partner_name
         self.program = program_name
         self.project = project_name
@@ -87,6 +89,14 @@ class Program:
                 languages.add(recip.language)
         return languages
 
+    def has_recipientid(self, recipientid):
+        return recipientid in self._recipientids
+
+    def add_recipientid(self, recipientid):
+        if self.has_recipientid(recipientid):
+            raise Exception("Duplicate recipientid: " + recipientid)
+        self._recipientids.add(recipientid)
+
     def add_component(self, name):
         component = Component(self, name)
         self.components[name] = component
@@ -106,7 +116,7 @@ class Program:
     #     return copy.copy(self.deployments)
     @property
     def deployment_numbers(self):
-        return self.deployments.keys()
+        return sorted(self.deployments.keys())
 
     def get_deployment(self, number):
         return self.deployments[number]
@@ -128,26 +138,45 @@ class Program:
     @property
     def serializable(self):
         result = {'partner': self.partner, 'program': self.program, 'project': self.project}
-        depls = []
-        cal = []
+        depls, cal = self.content
+        result['deployments'] = depls
+        result['content'] = cal
+
+        components = self.Xcomponents
+        result['components'] = components
+        return result
+
+    @property
+    def content(self):
+        result = []
         # Deployments and content calendar
         for no in self.deployment_numbers:
             deployment = self.deployments[no]
             depl = {'number': no,
                     'start_date': str(deployment.start_date.date()),
                     'end_date': str(deployment.end_date.date()),
-                    'filters': deployment.filters}
-            depls.append(depl)
+                    'playlists': []}
+            filters = {k:str(v) for k,v in deployment.filters.items()}
+            depl = {**depl, **filters}
+            result.append(depl)
             for playlist in deployment.playlists:
+                pl = {'deployment': deployment.number,
+                      'playlist': playlist.title,
+                      'messages': []}
+                depl['playlists'].append(pl)
                 for message in playlist.messages:
                     msg = {'deployment': deployment.number,
-                           'playlist': playlist.title,
-                           'title': message.title,
-                           'key_points': message.key_points,
-                           'filters': message.filters}
-                    cal.append(msg)
-        result['deployments'] = depls
-        result['content'] = cal
+                           'playlist': playlist.title}
+                    filters = {k: str(v) for k, v in message.filters.items()}
+                    msg = {**msg, **filters}
+                    for k in ['title', 'key_points', 'sdg_goals', 'sdg_targets']:
+                        if getattr(message, k, None) is not None:
+                            msg[k] = getattr(message, k)
+                    pl['messages'].append(msg)
+        return result
+
+    @property
+    def Xcomponents(self):
         # Components & Recipients
         components = {}
         for component in self.components.values():
@@ -155,8 +184,7 @@ class Program:
             for recip in component.recipients:
                 cmp.append(copy.copy(recip.properties))
             components[component.name] = cmp
-        result['components'] = components
-        return result
+        return components
 
     @property
     def has_changes(self):
@@ -169,7 +197,6 @@ class Program:
             for component in self.components.values():
                 component.save_changes(self._reader)
             self._reader.save(filename)
-
 
 
 class Deployment:
@@ -396,16 +423,16 @@ class Recipient:
     def __str__(self):
         comm = self._properties.get('community')
         grp = self._properties.get('group_name')
-        se = self._properties.get('support_entity')
+        ag = self._properties.get('agent')
         if grp:
             comm = comm + '/' + grp
-        if se:
-            comm = comm + '(' + se + ')'
+        if ag:
+            comm = comm + '(' + ag + ')'
         return comm
 
     @property
     def has_changes(self):
-        return len(self._tracker)>0
+        return len(self._tracker) > 0
 
     @property
     def properties(self):
@@ -419,6 +446,13 @@ class Recipient:
 
     def __setattr__(self, name, value):
         if name in RECIPIENT_FIELDS:
+            if name == 'recipientid':
+                if value == self._properties.get(name, None):
+                    return  # no change
+                if value is not None:
+                    # Throws if a duplicate.
+                    self.containing_component.program.add_recipientid(value)
+
             if self._tracker is not None and value != self._properties.get(name, None):
                 if value is None:
                     print('setting None value')
@@ -441,8 +475,8 @@ class Playlist:
         self.deployment = deployment
         self.title = title
 
-    def add_message(self, title, key_points, default_category, *args):
-        message = Message(self, title, key_points, default_category, *args)
+    def add_message(self, title, key_points, default_category, sdg_goals, sdg_targets, *args):
+        message = Message(self, title, key_points, default_category, sdg_goals, sdg_targets, *args)
         self._messages.append(message)
         return message
 
@@ -451,14 +485,35 @@ class Playlist:
         return self._messages
 
 
+# This recognizes 'd' or 'd.d'. To recognize 'd.d.d', change the ? to {0,2}.
+sdg_re = re.compile('^(\d+(?:\.\d)?)')
+# Recognizes a list of 'd' or 'd.d' separated by comma (and spaces) or spaces.
+sdg_bare_re = re.compile('^(\d+(\.\d)?)( *[ ,] *\d+(\.\d)?)*$')
 # Represents a Message in a Playlist. The Message has a Title and Key_Points, and may have a
 # set of 'Filters' limiting the recipients of the message.
 class Message:
-    def __init__(self, playlist: Playlist, title: str, key_points: str, default_category: str, *args):
+    def __init__(self, playlist: Playlist, title: str, key_points: str, default_category: str, sdg_goals: str,
+                 sdg_targets: str, *args):
+        def parse_sdg(sdg):
+            if type(sdg) != str or len(sdg) == 0:
+                return None
+            if sdg_bare_re.match(sdg):
+                list = re.split('[ ,]+', sdg)
+            else:
+                list = sdg.split(';')
+            sdgs = []
+            for s in list:
+                match = sdg_re.match(s.strip())
+                if match:
+                    sdgs.append(match.group(0))
+            return ','.join(sdgs) if len(sdgs)>0 else None
+
         self.playlist = playlist
         self.title = title
         self.key_points = key_points
         self.default_category = default_category
+        self.sdg_goals = parse_sdg(sdg_goals)
+        self.sdg_targets = parse_sdg(sdg_targets)
         filters = {}
         # We expect at most one dictionary of filters.
         for arg_dict in args:
