@@ -432,6 +432,40 @@ class Spreadsheet:
                     self.warn(errors.incorrect_component, args)
                     recipient['component'] = component_name
 
+    # Generate warnings for missing recipientid or directoryname. These may be added in a later reconcile step.
+    def _check_missing_recipientids(self):
+        def get_label(recipient):
+            label = 'community'
+            name = recipient['community']
+            grp = recipient.get('group_name', None)
+            if grp:
+                label += '/group'
+                name += '/' + grp
+            agt = recipient.get('agent', None)
+            if agt:
+                label += '/agent'
+                name += '/' + agt
+            return label,name
+        project_uses_custom_greetings = True
+        rows_to_report = 5;
+        rows_found = 0
+        for component_name in self._components:
+            recipients = self._recipients[component_name]
+            for recipient in recipients:
+                recipientid = recipient['recipientid'] if 'recipientid' in recipient else None
+                directory_name = recipient['directory_name'] if 'directory_name' in recipient else None
+                if not recipientid or (project_uses_custom_greetings and not directory_name):
+                    if rows_found < rows_to_report:
+                        lbl = get_label(recipient)
+                        args = {'component': component_name, 'label': lbl[0], 'name': lbl[1],
+                                'row': recipient['row_num']}
+                        self.warn(errors.missing_recipientid_or_dir, args)
+                    rows_found += 1
+        if rows_found > rows_to_report:
+            args = {'num': rows_found - rows_to_report}
+            self.warn(errors.missing_recipientids_or_dirs, args)
+
+
     # For each of the components, validate the recipients
     def _validate_recipients(self):
         self._recipients = {}
@@ -440,6 +474,7 @@ class Spreadsheet:
                 self._recipients[component_name] = self._get_rows_for_sheet(component_name, sheet_type='recipient')
         self._check_for_duplicate_recipients()
         self._check_component_in_recipients()
+        self._check_missing_recipientids()
 
     # performs validations on the workbook. Opportunistically caches data structures as it does so.
     def _validate(self):

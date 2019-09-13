@@ -51,6 +51,9 @@ incorrect_component = (ISSUE, 1001, 'Incorrect Component in community/group "{co
 
 missing_sheet_values = (ISSUE, 1010, 'Missing value for "{columns}" in sheet "{sheet}", row {row}.')
 
+missing_recipientid_or_dir = (ISSUE, 1020, 'Missing recipientid or directory name in sheet "{component}", {label}: {name} (row {row}).')
+missing_recipientids_or_dirs = (ISSUE, 1021, '... {num} more missing recipientids and/or directory names.')
+
 generic_warning = (ISSUE, 1999, '{message}')
 
 _severity = NO_ISSUE
