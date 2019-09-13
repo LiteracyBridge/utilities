@@ -212,12 +212,18 @@ class Spreadsheet:
 
         # Get the spreadsheet data.
         sh = self._wb[sheet_name]
+        result = []
+
         # Getting a slice of a single row returns the row, not a list with one element, but we always want a list. So,
         # get a slice of one more than we want, which will always be a list, then slice that down to what we do want.
+        #
+        # But, if there is only one row (the header, with no content), we can't get it in a list. So, detect that
+        # and return the empty list.
+        if sh.max_row == 1:
+            return result
+        
         raw_rows = sh[2:sh.max_row + 1]
         raw_rows = raw_rows[0:len(raw_rows) - 1]
-
-        result = []
 
         # Finally ready to gather the actual data.
         for ix in range(0, len(raw_rows)):

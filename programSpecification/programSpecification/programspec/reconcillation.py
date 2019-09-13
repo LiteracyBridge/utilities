@@ -215,7 +215,7 @@ class Reconciler:
 
     # Build a tuple for the recipient's name. Read as "X in Community", where X is group or support entity (CHW, etc)
     def _recip_tuple(self, recip: programspec.Recipient):
-        return (recip.community, recip.group, recip.agent)
+        return (recip.community, recip.group_name, recip.agent)
         # keys = [recip.community]
         # if recip.model.lower() == 'hhr':
         #     keys.append(None)
