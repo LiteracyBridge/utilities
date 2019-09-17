@@ -1,6 +1,6 @@
 PROJECT = checkout
 PYTHON = python3.7
-VIRTUAL_ENV = vcheckout
+VIRTUAL_ENV = venv
 FUNCTION_NAME = arn:aws:lambda:us-west-2:856701711513:function:acmCheckOut
 FUNCTION_HANDLER = lambda_handler
 AWS_REGION = us-west-2
