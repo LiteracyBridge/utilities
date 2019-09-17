@@ -68,6 +68,8 @@ choosable_columns = [
 
     'category',
     'playlist',
+    'sdg_goals',
+    'sdg_targets',
     'contentid',
     'title',
     'format',
@@ -106,7 +108,7 @@ CREATE OR REPLACE TEMP VIEW temp_usage AS (
 
 temp_view = 'temp_usage'
 
-
+# Get the user name and password that we need to sign into the SQL database. Configured through AWS console.
 def get_secret():
     result = ''
     secret_name = "lb_stats_access2"
@@ -162,6 +164,7 @@ def get_secret():
     return result
 
 
+# Make a connection to the SQL database
 def make_db_connection():
     global db_connection
     secret = get_secret()
@@ -182,10 +185,12 @@ def get_usage_params(request):
     params['project'] = args[0] if len(args) > 0 else 'DEMO'
     params['deployment'] = args[1] if len(args) > 1 else None
 
-    # Build the query
     sqv = SimpleQueryValidator(choosable_columns)
+    # Always include sum(completions) and sum(played_seconds). If these aren't included in the query from the user,
+    # we'll add them later.
     cpl = QueryColumn(column='completions', agg='sum')
     seconds = QueryColumn(column='played_seconds', agg='sum')
+    # Parse the user's query.
     parsed = sqv.parse(params['cols'])
     # If there was an error parsing, that'll be the result returned. Otherwise build the SQL query.
     if isinstance(parsed, str):
@@ -331,7 +336,7 @@ def lambda_handler(event, context):
 if __name__ == '__main__':
     debug = True
     #             claims = event['requestContext']['authorizer'].get('claims', {})
-    event = {'requestContext': {'authorizer': {'claims': {'edit': '*', 'view': '*'}}},
+    event = {'requestContext': {'authorizer': {'claims': {'edit': '.*', 'view': '.*'}}},
              'path': 'handler/usage/UNICEF-2/5',
              'queryStringParameters': {
                  'cols': 'deploymentnumber,district,count(talkingbookid),sum(played_seconds)/count(talkingbookid)as secs_per_tb'}}

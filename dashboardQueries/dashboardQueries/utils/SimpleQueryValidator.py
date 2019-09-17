@@ -2,6 +2,16 @@ import io
 import token
 from tokenize import tokenize
 
+"""
+This Module validates a query against a set of known columns, and can generate valid SQL equivalent to the query.
+
+Class SimpleQueryValidator is instantiated with a list of valid columns. It then can parse a simplified form
+of SQL against those columns. The query is validated as querying only those columns, with optional aggregations
+of sum(column) and count(column), optionally divided by sum(column) or count(column). Note that the input is
+simply "count(column)", but the output is "COUNT(DISTINCT column)". Output columns can be named with
+"as name", but if omitted aggregated or normalized columns will be given (semi-)meaningful names.   
+"""
+
 _aggregations = {'sum': ('SUM(', ''), 'count': ('COUNT(DISTINCT ', 'num_')}
 
 
@@ -20,11 +30,12 @@ class QueryColumn:
 
     def __eq__(self, o: object) -> bool:
         if isinstance(o, self.__class__):
-            return self._column == o._column and self._agg == o._agg and self._by_agg == o._by_agg and self._by_column == o._by_column and self._as == o._as
+            return self._column == o._column and self._agg == o._agg and \
+                   self._by_agg == o._by_agg and self._by_column == o._by_column and self._as == o._as
         return False
 
     def __hash__(self) -> int:
-        return hash(self._column, self._agg, self._by_column, self._by_agg, self._as)
+        return hash((self._column, self._agg, self._by_column, self._by_agg, self._as))
 
     # Generate the sql for the column
     @property
@@ -51,6 +62,8 @@ class QueryColumn:
         """
         :return: - the user's override if provided (and it differs from the column name), or
                  - a constructed name for aggregations
+                 Note that plain-old-data that was not given an "as name" decoration return
+                 None here.
         """
         if self.is_pod:
             return self._as if self._as != self._column else None
