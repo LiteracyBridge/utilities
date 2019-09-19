@@ -8,7 +8,7 @@ from fuzzywuzzy import fuzz
 
 from programspec import errors, programspec
 from programspec.programspec_constants import DIRECTORIES, XDIRECTORIES, XLSX, RECIPIENTS
-from programspec.recipient_utils import RecipientUtils
+from recipient_file_utils import RecipientFileUtils
 
 # In this module is it very useful to refer to recipients by (community, group, agent). For that purpose,
 # we use the term "community_group".
@@ -147,7 +147,7 @@ class Reconciler:
         self._update = update
         self._outdir = outdir
 
-        self._recipient_utils = RecipientUtils(spec, acmdir)
+        self._recipient_utils = RecipientFileUtils(spec, acmdir)
 
         self._unmatched_dirs = set()
         # set of {(community, group, agent)}. Initialized from program spec, ideally there will be a directory matching each one.

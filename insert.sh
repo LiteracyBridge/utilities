@@ -26,7 +26,7 @@ fi
 function configure() {
     recipientsfile="recipients.csv"
     recipmapfile="recipients_map.csv"
-    project="CBCC-RTI"
+    project="$(awk -F , 'NR==2{print $2}' recipients.csv)"
 
     echo $(date)>log.txt
     verbose=true
@@ -68,7 +68,10 @@ function importTable() {
                           supportentity = t.supportentity,
                           model = t.model,
                           language = t.language,
-                          coordinates = t.coordinates
+                          coordinates = t.coordinates,
+                          agent = t.agent,
+                          latitude = t.latitude,
+                          longitude = t.longitude
             from temp_recip t
             where recipients.recipientid = t.recipientid;
 

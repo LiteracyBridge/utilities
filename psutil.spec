@@ -3,8 +3,8 @@
 block_cipher = None
 
 
-a = Analysis(['/Users/bill/workspace/progspec/psutil.py'],
-             pathex=['/Users/bill/workspace/progspec'],
+a = Analysis(['psutil.py'],
+             pathex=['/Users/bill/workspace/psutil'],
              binaries=[],
              datas=[],
              hiddenimports=[],
