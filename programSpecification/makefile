@@ -29,23 +29,31 @@ build_package_tmp:
 	cp -a ./$(PROJECT)/. ./package/tmp/
 
 copy_python:
-	if test -d $(VIRTUAL_ENV)/lib; then \
-	    cp -a $(VIRTUAL_ENV)/lib/$(PYTHON)/site-packages/. ./package/tmp/; \
-	fi	
-	if test -d $(VIRTUAL_ENV)/lib64; then \
-	    cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; \
-	fi
+	if test -d $(VIRTUAL_ENV)/lib; then cp -a $(VIRTUAL_ENV)/lib/$(PYTHON)/site-packages/. ./package/tmp/; fi
+	if test -d $(VIRTUAL_ENV)/lib64; then cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; fi
 
 remove_unused:
 	rm -rf ./package/tmp/wheel*
 	rm -rf ./package/tmp/easy-install*
 	rm -rf ./package/tmp/setuptools*
 	rm -rf ./package/tmp/pip*
+	rm -rf ./package/tmp/botocore*
+	rm -rf ./package/tmp/boto3*
+	rm -rf ./package/tmp/s3transfer*
 	rm -rf ./package/tmp/.gitignore
+	rm -rf ./package/tmp/.idea
+
+	rm -rf ./package/tmp/awscli*
+	rm -rf ./package/tmp/colorama*
+	rm -rf ./package/tmp/rsa*
+	rm -rf ./package/tmp/pyasn1*
+
 
 zip:
 	cd ./package/tmp && zip -r ../$(PROJECT).zip .
+	date
 
 upload_lambda:
 	aws lambda update-function-code --function-name $(FUNCTION_NAME) --zip-file fileb://./package/$(PROJECT).zip
+	date
 

@@ -1,12 +1,15 @@
 import binascii
+import datetime
+import distutils.util
 import json
 import os
 import time
 from io import BytesIO
-from os.path import expanduser
 
 import boto3
-from programspec import errors, exporter, spreadsheet, programspec, specdiff
+from programspec import errors, spreadsheet, programspec, specdiff
+from programspec.exporter import Exporter
+from programspec.validator import Validator
 
 """
 Program Spec update utility.
@@ -40,8 +43,6 @@ approve         project, comment, versionId of pending .xlsx, versionId of curre
                  - if the version ids match, copies the pending .xlsx as the current .xlsx, and deletes
                    the current.
                  - user must have 'approve program spec' authority. 
-review          project
-                 - returns the changes between 'current' and 'pending' versions of the .xlsx
 list            project
                  - returns a list of program spec versions
 diff            project, versionId 1, versionId 2
@@ -49,7 +50,8 @@ diff            project, versionId 1, versionId 2
 
 """
 
-PROGSPEC_KEY = 'program_spec.xlsx'
+CURRENT_PROGSPEC_KEY = 'program_spec.xlsx'
+PENDING_PROGSPEC_KEY = 'pending_spec.xlsx'
 DEPLOYMENT_SPEC_KEY = 'deployment_spec.csv'
 TALKINGBOOK_MAP_KEY = 'talkingbook_map.csv'
 RECIPIENTS_MAP_KEY = 'recipients_map.csv'
@@ -57,9 +59,37 @@ RECIPIENTS_KEY = 'recipients.csv'
 CONTENT_JSON_KEY = 'content.json'
 CONTENT_CSV_KEY = 'content.csv'
 
+LIST_VERSION_KEYS = [CURRENT_PROGSPEC_KEY, PENDING_PROGSPEC_KEY]
+
+STATUS_OK = 'ok'
+STATUS_FAILURE = 'failure'
+STATUS_EXTRA_PARAMETER = 'Extraneous parameter'
+STATUS_ACCESS_DENIED = 'Access denied'
+STATUS_MISSING_PARAMETER = 'Missing parameter'
+
 s3 = boto3.client('s3')
 
 bucket = 'amplio-progspecs'
+
+
+class Authorizer():
+    def is_authorized(self, claims, action, project: str = None):
+        return True
+
+
+authorizer: Authorizer = Authorizer()
+
+# Given a value that may be True/False or may be a [sub-]string 'true'/'false', return the truth value.
+def _bool_arg(arg, default=False):
+    if type(arg) == bool:
+        return arg
+    elif arg is None:
+        return default
+    try:
+        return bool(distutils.util.strtobool(arg))
+    except ValueError:
+        return default
+
 
 def project_key(project: str, obj: str = ''):
     return '{}/{}'.format(project, obj)
@@ -86,22 +116,53 @@ def _get_errors(from_mark=None):
     return result
 
 
-def _get_versions(Bucket=bucket, Prefix=''):
+# Tries to load the given data as a program spec. Returns any resulting spec, and a boolean 'error free'.
+def _load_and_validate(data, project: str = None, **kwargs):
+    ps = None
+    file = BytesIO(data)
+    ss = spreadsheet.load(file)
+    # If the spreadsheet is structually OK, validate the program spec.
+    if ss.ok:
+        ps = programspec.get_program_spec_from_spreadsheet(ss, cannonical_acm_project_name(project))
+        args = {}
+        validator = Validator(ps, **kwargs)
+        validator.validate()
+
+    # Note that simply getting a programspec does not mean there are no errors.
+    return ps, not errors.has_error()
+
+# List the versions of objects with the given prefix.
+def _list_versions(Bucket=bucket, Prefix=''):
     paginator = s3.get_paginator("list_object_versions")
-    kwargs = {'Bucket': Bucket, 'Prefix':Prefix}
+    kwargs = {'Bucket': Bucket, 'Prefix': Prefix}
     for versions in paginator.paginate(**kwargs):
         for version in versions.get('Versions', []):
             yield version
 
-def _delete_older_versions(version_to_keep: str, prefix: str):
-    found_date = None
-    # We're allowed to delete up to 1000 objects, a page worth. So accumulate and delete keys per page.
+
+# List the objects with the given prefix.
+def _list_objects(Bucket=bucket, Prefix=''):
+    paginator = s3.get_paginator("list_objects_v2")
+    kwargs = {'Bucket': Bucket, 'Prefix': Prefix}
+    for objects in paginator.paginate(**kwargs):
+        for object in objects.get('Contents', []):
+            yield object
+
+
+# Deletes versions that match the given prefix. Optional string or iterable list of versions to not delete.
+def _delete_versions(prefix: str, versions_to_keep=None):
+    if prefix is None or len(prefix) < 2:
+        raise ValueError('Must specify a prefix to delete.')
+    if versions_to_keep is None:
+        versions_to_keep = []
+    elif type(versions_to_keep) == str:
+        versions_to_keep = [versions_to_keep]
+    versions_to_keep = set(versions_to_keep)
+    # We can to delete up to 1000 objects at a time. So accumulate and delete keys per page.
     to_delete = []
-    for version in _get_versions(Prefix=prefix):
-        if found_date and not version.get('IsLatest') and version.get('LastModified') < found_date:
+    for version in _list_versions(Prefix=prefix):
+        if not version.get('VersionId') in versions_to_keep:
             to_delete.append({'Key': prefix, 'VersionId': version.get('VersionId')})
-        elif version.get('VersionId') == version_to_keep:
-            found_date = version.get('LastModified')
         if len(to_delete) == 1000:
             s3.delete_objects(Delete={'Objects': to_delete}, Bucket=bucket)
             to_delete.clear()
@@ -110,209 +171,517 @@ def _delete_older_versions(version_to_keep: str, prefix: str):
         s3.delete_objects(Delete={'Objects': to_delete}, Bucket=bucket)
 
 
-def _upload_parts(data, acm_name, progspec: programspec, metadata):
-    project = cannonical_acm_project_name(acm_name)
-    expiration = 60
+def _extract_parts(project: str, versionid: str):
+    # Read data from S3
+    key = project_key(project, CURRENT_PROGSPEC_KEY)
+    obj = s3.get_object(Bucket=bucket, Key=key, VersionId=versionid)
+    data = obj.get('Body').read()
+    progspec, ok = _load_and_validate(data, project)
+    metadata = {'programspec_versionid': versionid}
+    exporter = Exporter(progspec)
 
-    # Write id to S3
-    objdata = exporter.get_content_csv(progspec).getvalue().encode('utf-8-sig')
+    # Write the individual files to S3
     key = project_key(project, CONTENT_CSV_KEY)
+    objdata = exporter.get_content_csv().getvalue().encode('utf-8-sig')
     put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
-    _delete_older_versions(put_result.get('VersionId'), key)
+    _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
 
-    objdata = exporter.get_content_json(progspec).encode('utf-8')
     key = project_key(project, CONTENT_JSON_KEY)
+    objdata = exporter.get_content_json().encode('utf-8')
     put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
-    _delete_older_versions(put_result.get('VersionId'), key)
+    _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
 
-    objdata = exporter.get_recipients_csv(progspec).getvalue().encode('utf-8')
     key = project_key(project, RECIPIENTS_KEY)
+    objdata = exporter.get_recipients_csv().getvalue().encode('utf-8')
     put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
-    _delete_older_versions(put_result.get('VersionId'), key)
+    _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
 
-    objdata = exporter.get_recipients_map_csv(progspec).getvalue().encode('utf-8')
+    key = project_key(project, RECIPIENTS_MAP_KEY)
+    objdata = exporter.get_recipients_map_csv().getvalue().encode('utf-8')
     if len(objdata) > 0:
-        key = project_key(project, RECIPIENTS_MAP_KEY)
         put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
-        _delete_older_versions(put_result.get('VersionId'), key)
+        _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
+    else:
+        _delete_versions(key)
 
-    objdata = exporter.get_talkingbook_map_csv(progspec).getvalue().encode('utf-8')
+    key = project_key(project, TALKINGBOOK_MAP_KEY)
+    objdata = exporter.get_talkingbook_map_csv().getvalue().encode('utf-8')
     if len(objdata) > 0:
-        key = project_key(project, TALKINGBOOK_MAP_KEY)
         put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
-        _delete_older_versions(put_result.get('VersionId'), key)
+        _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
+    else:
+        _delete_versions(key)
 
-    objdata = exporter.get_deployments_csv(progspec).getvalue().encode('utf-8')
     key = project_key(project, DEPLOYMENT_SPEC_KEY)
+    objdata = exporter.get_deployments_csv().getvalue().encode('utf-8')
     put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
-    _delete_older_versions(put_result.get('VersionId'), key)
-
-    key = project_key(project, PROGSPEC_KEY)
-    put_result = s3.put_object(Body=data, Bucket=bucket, Metadata=metadata, Key=key)
-    # _delete_older_versions(put_result.get('VersionId'), key)
-
-    # Read id from S3
-    data = s3.get_object(Bucket=bucket, Key=project_key(project, CONTENT_JSON_KEY))
-    objid = data.get('Body').read().decode('utf-8')
-    print("Id:" + objid)
-
-    params = {'Bucket': bucket, 'Key': project_key(project, CONTENT_JSON_KEY)}
-    signed_url = s3.generate_presigned_url('get_object', Params=params, ExpiresIn=expiration)
-    print(signed_url)
+    _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
 
 
-def _upload(data, project, metadata):
-    file = BytesIO(data)
-    ss_data = spreadsheet.load(file)
-    if not errors.has_error():
-        progspec = programspec.get_program_spec_from_spreadsheet(ss_data, cannonical_acm_project_name(project))
-        _upload_parts(data, project, progspec, metadata)
+def do_approve(params, claims):
+    result = {'status': STATUS_OK, 'output': []}
+    project = params.get('project')
+    if not project:
+        return {'status': STATUS_MISSING_PARAMETER, 'output': ['Must specify project.']}
+    project = cannonical_acm_project_name(project)
+    if not authorizer.is_authorized(claims, 'submit-progspec', project):
+        return {'status': STATUS_ACCESS_DENIED, 'output': ['Access denied']}
+    # Make sure the versions we have are the versions the user expected.
+    current_version = params.get('current')
+    current_key = project_key(project, CURRENT_PROGSPEC_KEY)
+    try:
+        current_metadata = s3.head_object(Bucket=bucket, Key=current_key)
+    except Exception:
+        current_metadata = {'VersionId': 'None'}
 
+    pending_version = params.get('pending')
+    pending_key = project_key(project, PENDING_PROGSPEC_KEY)
+    pending_metadata = s3.head_object(Bucket=bucket, Key=pending_key)
 
-def _diff2(project, data1, data2):
-    result = []
-    file1 = BytesIO(data1)
-    ss_data1 = spreadsheet.load(file1)
-    progspec1 = None
-    if not errors.has_error():
-        progspec1 = programspec.get_program_spec_from_spreadsheet(ss_data1, project)
-    result.append(_get_errors())
-    errors.reset()
+    if current_version != current_metadata.get('VersionId'):
+        result['output'].append('Version mismatch on current programspec.')
+        result['status'] = STATUS_FAILURE
+    if pending_version != pending_metadata.get('VersionId'):
+        result['output'].append('Version mismatch on pending programspec.')
+        result['status'] = STATUS_FAILURE
 
-    file2 = BytesIO(data2)
-    ss_data2 = spreadsheet.load(file2)
-    progspec2 = None
-    if not errors.has_error():
-        progspec2 = programspec.get_program_spec_from_spreadsheet(ss_data2, project)
-    result.append(_get_errors())
+    if result['status'] == STATUS_OK:
+        metadata = pending_metadata.get('Metadata', {})
+        metadata['approver-email'] = claims.get('email')
+        metadata['approver-comment'] = params.get('comment', 'No comment provided')
+        metadata['approval-date'] = datetime.datetime.now().isoformat()
 
-    if not progspec1 or not progspec2:
-        result.append("Error(s) loading program specification(s), can't continue")
-        return result
+        copy_result = s3.copy_object(Bucket=bucket,
+                                     CopySource={'Bucket': bucket, 'Key': pending_key, 'VersionId': pending_version},
+                                     Key=current_key,
+                                     Metadata=metadata, MetadataDirective='REPLACE')
 
-    differ = specdiff.SpecDiff(progspec1, progspec2)
-    diffs = differ.diff()
-    return result.append(diffs)
+        _extract_parts(project, copy_result.get('VersionId'))
+        _delete_versions(pending_key)
 
+        result['CurrentId'] = copy_result.get('VersionId')
+        result['ETag'] = copy_result.get('CopyObjectResult', {}).get('ETag')
+        result['LastModified'] = copy_result.get('CopyObjectResult', {}).get('LastModified').isoformat()
 
-
-def _diff(data, acm_name, params):
-    project = cannonical_acm_project_name(acm_name)
-    file1 = BytesIO(data)
-    ss_data1 = spreadsheet.load(file1)
-    if not errors.has_error():
-        progspec1 = programspec.get_program_spec_from_spreadsheet(ss_data1, project)
-        obj2 = s3.get_object(Bucket=bucket, Key=project_key(project, PROGSPEC_KEY))
-        data2 = obj2.get('Body').read()
-        file2 = BytesIO(data2)
-        ss_data2 = spreadsheet.load(file2)
-        progspec2 = programspec.get_program_spec_from_spreadsheet(ss_data2, project)
-
-        differ = specdiff.SpecDiff(progspec1, progspec2)
-        diffs = differ.diff()
-        return diffs
-
-
-def _list(acm_name, params):
-    project = cannonical_acm_project_name(acm_name)
-    xls_key = project_key(project, PROGSPEC_KEY)
-    result = []
-    for version in _get_versions(Prefix=project_key(project)):
-        details = {'Key': version.get('Key'), 'VersionId': version.get('VersionId'),
-                       'LastModified': str(version.get('LastModified'))}
-        if details['Key'] == xls_key and version.get('IsLatest'):
-            metadata = s3.head_object(Bucket=bucket, Key=details['Key'], VersionId=details['VersionId'])
-            details['Metadata'] = metadata.get('Metadata')
-        result.append(details)
     return result
 
 
-def _validate(data, acm_name):
-    file = BytesIO(data)
-    ss_data = spreadsheet.load(file)
-    progspec = None
-    # Get the program spec. Even if we don't want the spec, we want the side effect of finding any duplicates, etc.
-    if not errors.has_error():
-        progspec = programspec.get_program_spec_from_spreadsheet(ss_data, cannonical_acm_project_name(acm_name))
+def do_getlink(params, claims):
+    project = params.get('project')
+    if not project:
+        return {'status': STATUS_MISSING_PARAMETER, 'output': ['Must specify project.']}
+    project = cannonical_acm_project_name(project)
+    if not authorizer.is_authorized(claims, 'submit-progspec', project):
+        return {'status': STATUS_ACCESS_DENIED, 'output': ['Access denied']}
+    version = params.get('version')
+    if not version:
+        return {'status': STATUS_MISSING_PARAMETER, 'version': ['Must specify version.']}
 
-    return _get_errors(), progspec
+    params = {'Bucket': bucket}
+    if version == 'current':
+        key = project_key(project, CURRENT_PROGSPEC_KEY)
+    elif version == 'pending':
+        key = project_key(project, PENDING_PROGSPEC_KEY)
+    else:
+        key = project_key(project, CURRENT_PROGSPEC_KEY)
+        params['VersionId'] = version
+
+    params['Key'] = key
+    head = s3.head_object(**params)
+    obj = {'Metadata': head.get('Metadata'), 
+    'VersionId': head.get('VersionId'),
+    'Size': head.get('ContentLength'), 
+    'LastModified': head.get('LastModified').isoformat(),
+    'Key': params.get('Key')}
+    signed_url = s3.generate_presigned_url('get_object', Params=params, ExpiresIn=600)
+    return {'url': signed_url, 'status': 'ok', 'object': obj, 'version': version}
+
+
+def do_getfile(params, claims):
+    project = params.get('project')
+    if not project:
+        return {'status': STATUS_MISSING_PARAMETER, 'output': ['Must specify project.']}
+    project = cannonical_acm_project_name(project)
+    if not authorizer.is_authorized(claims, 'submit-progspec', project):
+        return {'status': STATUS_ACCESS_DENIED, 'output': ['Access denied']}
+    version = params.get('version')
+    if not version:
+        return {'status': STATUS_MISSING_PARAMETER, 'version': ['Must specify version.']}
+
+    params = {'Bucket': bucket}
+    if version == 'current':
+        key = project_key(project, CURRENT_PROGSPEC_KEY)
+    elif version == 'pending':
+        key = project_key(project, PENDING_PROGSPEC_KEY)
+    else:
+        key = project_key(project, CURRENT_PROGSPEC_KEY)
+        params['VersionId'] = version
+
+    params['Key'] = key
+    head = s3.head_object(**params)
+    s3obj = {'Metadata': head.get('Metadata'),
+             'VersionId': head.get('VersionId'),
+             'Size': head.get('ContentLength'),
+             'LastModified': head.get('LastModified').isoformat(),
+             'Key': params.get('Key')}
+
+    obj = s3.get_object(**params)
+    bin_data = obj.get('Body').read()
+    data = binascii.b2a_base64(bin_data).decode('ascii')
+    return {'status': STATUS_OK, 'data': str(data), 'object':s3obj, 'version':version}
+
+
+def do_submit(data, params, claims):  # project, metadata):
+    project = params.get('project')
+    if not project:
+        return {'status': STATUS_MISSING_PARAMETER, 'output': ['Must specify project.']}
+    project = cannonical_acm_project_name(project)
+    if not authorizer.is_authorized(claims, 'submit-progspec', project):
+        return {'status': STATUS_ACCESS_DENIED, 'output': ['Access denied']}
+
+    metadata = {'submitter-email': claims.get('email'),
+                'submitter-comment': params.get('comment', 'No comment provided'),
+                'submission-date': datetime.datetime.now().isoformat()}
+
+    # Validate the program spec.
+    kwargs = {'fix_recips': _bool_arg(params.get('fix_recips'))}
+    kwargs['save_changes'] = kwargs.get('fix_recips')
+    ps, ok = _load_and_validate(data, project, **kwargs)
+    result = {'output': _get_errors()}
+
+    if ok:
+        # If we (may have) tweaked the program spec (eg, assigned recipientids), get the updated data.
+        if kwargs.get('save_changes'):
+            xls_data = BytesIO()
+            ps.save_changes(xls_data)
+            data = xls_data.getvalue()
+
+        key = project_key(project, PENDING_PROGSPEC_KEY)
+        put_result = s3.put_object(Body=data, Bucket=bucket, Metadata=metadata, Key=key)
+        _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
+
+        result['status'] = STATUS_OK
+        result['PendingId'] = put_result.get('VersionId')
+        result['ETag'] = put_result.get('ETag')
+
+    else:
+        result['status'] = STATUS_FAILURE
+
+    return result
+
+
+# Does the work of comparing two versions of programspec.
+def _diff2(data1, data2, project: str = None, name1='version 1', name2='version 2', **kwargs):
+    result = ["Examining '{}' program specification.".format(name1)]
+
+    ps1, ok1 = _load_and_validate(data1, project, **kwargs)
+    result.extend(_get_errors())
+    errors.reset()
+
+    result.append("Examining '{}' program specification.".format(name2))
+    ps2, ok2 = _load_and_validate(data2, project, **kwargs)
+    result.extend(_get_errors())
+
+    if not ps1 or not ps2:
+        result.append("Error(s) loading program specification(s), can't continue.")
+        return result
+
+    result.append("Differences from '{}' to '{}' program specification.".format(name1, name2))
+    differ = specdiff.SpecDiff(ps1, ps2)
+    diffs = differ.diff()
+    if len(diffs) == 0:
+        result.append(' -- no differences found.')
+    else:
+        result.extend(diffs)
+    return result
+
+
+def do_diff(data, params, claims):
+    def get_version(v):
+        try:
+            name = {'name': v}
+            if v == 'pending':
+                key = project_key(project, PENDING_PROGSPEC_KEY)
+                obj = s3.get_object(Bucket=bucket, Key=key)
+            elif v == 'current':
+                key = project_key(project, CURRENT_PROGSPEC_KEY)
+                obj = s3.get_object(Bucket=bucket, Key=key)
+            else:
+                key = project_key(project, CURRENT_PROGSPEC_KEY)
+                obj = s3.get_object(Bucket=bucket, Key=key, VersionId=v)
+                name['name'] = 'version ' + v
+            obj['Key'] = key
+            obj_data = obj.get('Body').read()
+            name['VersionId'] = obj.get('VersionId')
+            name['LastModified'] = obj.get('LastModified').isoformat()
+            name['Metadata'] = obj.get('Metadata')
+        except Exception as ex:
+            obj_data = None
+            name = {'name': 'not found'}
+        return obj_data, name
+
+    kwargs = {'fix_recips': _bool_arg(params.get('fix_recips'))}
+    project = params.get('project')
+    if not project:
+        return {'status': STATUS_MISSING_PARAMETER, 'output': ['Must specify project.']}
+    project = cannonical_acm_project_name(project)
+    if not authorizer.is_authorized(claims, 'list-progspec', project):
+        return {'status': STATUS_ACCESS_DENIED, 'output': ['Access denied.']}
+
+    v1 = params.get('v1')
+    v2 = params.get('v2')
+    if not v1 or (not v2 and not data):
+        return {'status': STATUS_MISSING_PARAMETER, 'output': ['Must specify two program specs to compare.']}
+    if v2 and data:
+        return {'status': STATUS_EXTRA_PARAMETER, 'output': ['Must specify two program specs to compare.']}
+    result = {'output': []}
+    d1, n1 = get_version(v1)
+    if v2:
+        d2, n2 = get_version(v2)
+    else:
+        n2 = {'name': 'uploaded file'}
+        d2 = data
+    result['v1'] = n1
+    result['v2'] = n2
+
+    if d1 and d2:
+        diff = _diff2(d1, d2, project, name1=n1['name'], name2=n2['name'], **kwargs)
+        result['output'] = diff
+        result['status'] = STATUS_OK
+    else:
+        if not d1:
+            result['output'].append('Missing spec-1')
+        if not d2:
+            result['output'].append('Missing spec-2')
+        result['status'] = STATUS_FAILURE
+
+    return result
+
+# Obtain a list of the current objects for the project. If requested, return the list of versions of program_spec.xlsx.
+def do_list(params, claims):
+    project = params.get('project')
+    if not project:
+        return {'status': STATUS_MISSING_PARAMETER, 'output': ['Must specify project.']}
+    project = cannonical_acm_project_name(project)
+    if not authorizer.is_authorized(claims, 'list-progspec', project):
+        return {'status': STATUS_ACCESS_DENIED, 'output': ['Access denied']}
+    prefix = project_key(project)
+    xls_key = project_key(project, CURRENT_PROGSPEC_KEY)
+    result = {'output': [], 'status': STATUS_OK, 'objects': {}, 'versions': []}
+
+    for object in _list_objects(Prefix=prefix):
+        fn = object.get('Key')[len(prefix):]
+        details = {'Key': object.get('Key'),
+                   'Size': object.get('Size'),
+                   'LastModified': object.get('LastModified').isoformat(),
+                   'ETag': object.get('ETag')}
+        if fn in LIST_VERSION_KEYS:
+            metadata = s3.head_object(Bucket=bucket, Key=object.get('Key'))
+            details['VersionId'] = metadata.get('VersionId')
+            details['Metadata'] = metadata.get('Metadata')
+        result['objects'][fn] = details
+
+    if _bool_arg(params.get('versions')):
+        for version in _list_versions(Prefix=xls_key):
+            details = {'VersionId': version.get('VersionId'),
+                       'LastModified': version.get('LastModified').isoformat(),
+                       'ETag': version.get('ETag'),
+                       'IsLatest': version.get('IsLatest')}
+            result['versions'].append(details)
+    # convenience variables
+    result['CurrentId'] = result['objects'].get(CURRENT_PROGSPEC_KEY, {}).get('VersionId', 'None')
+    result['PendingId'] = result['objects'].get(PENDING_PROGSPEC_KEY, {}).get('VersionId', 'None')
+    return result
+
+# Validate a program spec
+def do_validate(data, params, claims):
+    project = params.get('project')
+    kwargs = {'fix_recips': _bool_arg(params.get('fix_recips'))}
+    kwargs['save_changes'] = kwargs.get('fix_recips')
+    _load_and_validate(data, project, **kwargs)
+    return {'status': STATUS_OK,
+            'severity': errors.severity.get(errors.get_severity()) or 'No issues',
+            'output': _get_errors()}
 
 
 def lambda_handler(event, context):
+    global authorizer
     start = time.time_ns()
     errors.reset()
 
     keys = [x for x in event.keys()]
-    info = {'keys': keys}
+    # info = {'keys': keys}
     #         'resource': event.get('resource', '-no resource'),
     #         'path': event.get('path', '-no path'),
     #         'httpMethod': event.get("httpMethod", '-no httpMethod')}
-    for key in keys:
-        if key != 'body':
-            info[key] = event.get(key, '-no ' + key)
-    parts = event.get('pathParameters').split('/')
-    function = parts[2] if len(parts) > 2 else 'validate'
-    query_params = {'path': event.get('pathParameters'), 'query': event.get('queryStringParameters'),
-              'vars': event.get('stageVariables')}
+    # for key in keys:
+    #     if key != 'body':
+    #         info[key] = event.get(key, '-no ' + key)
+    try:
+        parts = [x for x in event.get('pathParameters').get('proxy').split('/') if x != 'data']
+        function = parts[0]
+    except:
+        function = 'validate'
 
-    # print('Lambda function invoked with {}: {}'.format(type(event), len(event.get('body'))))
+    path = event.get('path', {})
+    path_parameters = event.get('pathParameters', {})
+    multi_value_query_string_parameters = event.get('multiValueQueryStringParameters', {})
+    query_string_params = event.get('queryStringParameters', {})
 
-    queryStringParams = event.get('queryStringParameters', {})
-    project = queryStringParams.get('project', '')
-    comment = queryStringParams.get('comment', None)
+    print('pathParameters: {}, path: {}, function: {}'.format(path_parameters, path, function))
 
-    data = binascii.a2b_base64(event.get('body')) if 'body' in event else None
+    result = {'output': [],
+              'status': ''}
+
+    data = None
+    body = event.get('body')
+    if body is None:
+        print('Body is None')
+    else:
+        print('Body is {} characters long'.format(len(body)))
+    if body:
+        try:
+            data = binascii.a2b_base64(body)
+        except Exception as ex:
+            data = None
+
     claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
     params = {'uploader_email': claims.get('email', None)}
-    if function == 'validate':
-        issues, _ = _validate(data, project)
-    elif function == 'diff':
-        issues = _diff(data, project, params)
-    elif function == 'upload':
-        if comment:
-            params['uploader_comment'] = comment
-        issues = _upload(data, project, params)
-    elif function == 'list':
-        issues = _list(project, params)
+
+    try:
+        if function == 'validate':
+            result = do_validate(data, query_string_params, claims)
+
+        elif function == 'list':
+            result = do_list(query_string_params, claims)
+
+        elif function == 'diff':
+            result = do_diff(data, query_string_params, claims)
+
+        elif function == 'submit':
+            result = do_submit(data, query_string_params, claims)
+
+        elif function == 'approve':
+            result = do_approve(query_string_params, claims)
+
+        elif function == 'getlink':
+        	result = do_getlink(query_string_params, claims)
+
+        elif function == 'getfile':
+            result = do_getfile(query_string_params, claims)
+
+        elif function == 'regenerate':
+            pass
+
+        elif function == 'expunge':
+            pass
+
+    except Exception as ex:
+        result['status'] = STATUS_FAILURE
+        result['exception'] = 'Exception: {}'.format(ex)
 
     end = time.time_ns()
     return {
         'statusCode': 200,
         "headers": {"Access-Control-Allow-Origin": "*"},
-        'body': json.dumps({'msg': 'Hello from Lambda!',
+        'body': json.dumps({'msg': 'Program Specification Utility',
                             'keys': keys,
-                            'info': info,
-                            'issues': issues,
-                            'params': params,
-                            'query_params': query_params,
+                            'result': result,
+                            'claims': claims,
+                            'function': function,
+                            'path': path,
+                            'path_parameters': path_parameters,
+                            'query_string_params': query_string_params,
+                            'multi_value_query_string_parameters': multi_value_query_string_parameters,
                             'msec': (end - start) / 1000000})
     }
 
 
 if __name__ == '__main__':
-    print('Just testing')
-    bytes_read = open("../TEST-ProgramSpecification.xlsx", "rb").read()
-    print('Got {} bytes'.format(len(bytes_read)))
-    _validate(bytes_read, 'TEST')
+    def __test__():
+        from os.path import expanduser
+        from pathlib import Path
 
-    body = binascii.b2a_base64(bytes_read)
-    event = {'requestContext': {'authorizer': {'claims': {'edit': '.*', 'view': '.*', 'email': 'bill@amplio.org'}}},
-             'pathParameters': '/data/upload', 'queryStringParameters': {'project': 'TEST',
-                                                                         'comment': 'Revised content calendar for deployment #3.'},
-             'body': body}
-    lambda_handler(event, {})
+        def test_submit(fn, comment='No commment provided.'):
+            print('\nSubmit {}:'.format(fn))
+            bytes_read = open(expanduser(fn), "rb").read()
+            body_data = binascii.b2a_base64(bytes_read)
 
-    bytes_read = open(expanduser("~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification-updated.xlsx"), "rb").read()
-    body = binascii.b2a_base64(bytes_read)
-    event = {'requestContext': {'authorizer': {'claims': {'edit': '.*', 'view': '.*', 'email': 'bill@amplio.org'}}},
-             'pathParameters': '/data/diff', 'queryStringParameters': {'project': 'TEST',
-                                                                       'comment': 'Revised content calendar for deployment #3.'},
-             'body': body}
-    lambda_handler(event, {})
+            submit_event = {'requestContext': {'authorizer': {'claims': claims}},
+                            'pathParameters': {'proxy':'submit'}, 'queryStringParameters': {'project': 'TEST',
+                                                                                        'fix_recips': True,
+                                                                                        'comment': comment},
+                            'body': body_data}
+            result = lambda_handler(submit_event, {})
+            submit_result = json.loads(result['body']).get('result', {})
+            print(submit_result)
+            print('Submit ' + submit_result['status'])
+            return submit_result.get('PendingId')
 
-    event = {'requestContext': {'authorizer': {'claims': {'edit': '.*', 'view': '.*', 'email': 'bill@amplio.org'}}},
-             'pathParameters': '/data/list', 'queryStringParameters': {'project': 'TEST',
-                                                                       'comment': 'Revised content calendar for deployment #3.'}
-             }
-    result = lambda_handler(event, {})
-    print(result)
+        def test_approve(current, pending, comment='No comment provided.'):
+            print('\nApprove {} replacing {}:'.format(pending, current))
+            approve_event = {'requestContext': {'authorizer': {'claims': claims}},
+                             'pathParameters': {'proxy':'approve'}, 'queryStringParameters': {'project': 'TEST',
+                                                                                          'comment': comment,
+                                                                                          'current': current,
+                                                                                          'pending': pending}}
+            result = lambda_handler(approve_event, {})
+            approve_result = json.loads(result['body']).get('result', {})
+            print(approve_result)
+            print('Approve ' + approve_result['status'])
+            return approve_result.get('CurrentId')
+
+        def test_diff(v1, v2):
+            print('\nDiff {} => {}:'.format(v1, v2))
+            diff_event = {'requestContext': {'authorizer': {'claims': claims}},
+                          'pathParameters': {'proxy':'diff'}, 'queryStringParameters': {'project': 'TEST',
+                                                                                    'fix_recips': True,
+                                                                                    'v1': v1}}
+            p2 = Path(expanduser(v2))
+            if p2.exists():
+                bytes_read = open(p2, "rb").read()
+                body = binascii.b2a_base64(bytes_read)
+                diff_event['body'] = body
+            else:
+                diff_event['queryStringParameters']['v2'] = v2
+            result = lambda_handler(diff_event, {})
+            diff_result = json.loads(result['body']).get('result')
+            print('\n'.join(diff_result['output']))
+            print({k:v for k,v in diff_result.items() if k!='output'})
+
+        def test_list():
+            print('\nList:')
+            event = {'requestContext': {'authorizer': {'claims': claims}},
+                     'pathParameters': {'proxy':'list'}, 'queryStringParameters': {'project': 'TEST'}
+                     }
+            result = lambda_handler(event, {})
+            list_result = json.loads(result['body']).get('result')
+            for f, st in list_result['objects'].items():
+                print('{}: {}'.format(f, st))
+            return list_result
+
+        claims = {'edit': '.*', 'view': '.*', 'email': 'bill@amplio.org'}
+        print('Just testing')
+
+        obj_list = test_list()
+
+        pending_id = test_submit('~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx', comment='First test program spec.')
+        obj_list = test_list()
+
+        current_id = test_approve(current=obj_list.get('CurrentId'), pending=pending_id,
+                                  comment='First approved program specification')
+        obj_list = test_list()
+
+        pending_id = test_submit('~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification-updated.xlsx', comment='Second submitted program spec.')
+        obj_list = test_list()
+        test_diff('current', 'pending')
+        test_diff('current', '~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx')
+        test_diff('pending', 'current')
+
+        current_id = test_approve(current=current_id, pending=pending_id, comment='Second approved program spec.')
+        obj_list = test_list()
+
+        pending_id = test_submit('~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx', comment='Third submitted program spec.')
+        obj_list = test_list()
+
+    __test__()
