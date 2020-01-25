@@ -9,14 +9,18 @@ AWS_REGION = us-west-2
 help: helper
 install: virtual
 build: clean_package build_package_tmp copy_python remove_unused zip
+all: upgrade build upload_lambda
 
 helper:
-	echo "install, build, clean_package, upload_lambda"
+	echo "install, upgrade, build, clean_package, upload_lambda"
 
 virtual:
 	@echo "--> Setup and activate virtualenv"
 	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv $(VIRTUAL_ENV); fi
 	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
+
+upgrade:
+	pip3 install --extra-index-url http://localhost:8000 --upgrade programspec	
 
 sync:
 	rsync -av  ../../progspec/programspec/*.py  programSpecification/programspec/

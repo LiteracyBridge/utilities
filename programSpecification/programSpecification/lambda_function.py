@@ -4,6 +4,7 @@ import distutils.util
 import json
 import os
 import time
+import traceback
 from io import BytesIO
 
 from botocore.exceptions import ClientError
@@ -113,10 +114,12 @@ def cannonical_acm_project_name(acmdir):
 # Retrieve any errors (& warnings, info, ...) with optional starting point. Format into a list of
 # Severity-Name
 #   issue ...
-def _get_errors(from_mark=None):
+def _get_errors(from_mark=None, min_severity=errors.ISSUE):
     result = []
     previous_severity = -1
     for error in errors.get_errors(mark=from_mark):
+        if error[0] > min_severity: # A higher numerical value is a lower severity
+            continue
         if error[0] != previous_severity:
             previous_severity = error[0]
             result.append('{}:'.format(errors.severity[error[0]]))
@@ -427,7 +430,7 @@ def do_diff(data, params, claims):
             name['Metadata'] = obj.get('Metadata')
         except ClientError as ex:
             obj_data = None
-            name = {'name': 'not found', 'ex': ex}
+            name = {'name': 'not found', 'ex': str(ex)}
         return obj_data, name
 
     kwargs = {'fix_recips': _bool_arg(params.get('fix_recips'))}
@@ -587,6 +590,7 @@ def lambda_handler(event, context):
             pass
 
     except Exception as ex:
+        traceback.print_exception(type(ex), ex, ex.__traceback__)
         result['status'] = STATUS_FAILURE
         result['exception'] = 'Exception: {}'.format(ex)
 
