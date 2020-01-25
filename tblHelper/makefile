@@ -17,7 +17,7 @@ helper:
 
 virtual:
 	@echo "--> Setup and activate virtualenv"
-	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m --system-site-packages venv $(VIRTUAL_ENV); fi
+	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv --system-site-packages $(VIRTUAL_ENV); fi
 	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
 
 clean_package:
@@ -28,8 +28,8 @@ build_package_tmp:
 	cp -a ./$(PROJECT)/. ./package/tmp/
 
 copy_python:
-	if test -d $(VIRTUAL_ENV)/lib; then cp -a $(VIRTUAL_ENV)/lib/$(PYTHON)/site-packages/. ./package/tmp/; fi
-	if test -d $(VIRTUAL_ENV)/lib64; then cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; fi
+# 	if test -d $(VIRTUAL_ENV)/lib; then cp -a $(VIRTUAL_ENV)/lib/$(PYTHON)/site-packages/. ./package/tmp/; fi
+# 	if test -d $(VIRTUAL_ENV)/lib64; then cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; fi
 
 remove_unused:
 	rm -rf ./package/tmp/wheel*

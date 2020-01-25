@@ -52,6 +52,14 @@ MAX_VALUE = 65000
 MAX_ID = 65000
 DEFAULT_RESERVATION = 1024
 
+OFFSET = 128
+ROUND = 256
+M1 = ROUND-1
+MASK = ~M1
+
+def _round_up(x):
+    return (x & MASK) + ROUND + OFFSET
+
 # region Table Initialization Code
 def create_table(table_name=None, attributes=None):
     """
@@ -98,6 +106,28 @@ def delete_tables():
 
     end_time = time.time()
     print('Deleted {} tables in {:.2g} seconds'.format(num_updated, end_time - start_time))
+
+def delete_tables():
+    start_time = time.time()
+    num_updated = 0
+
+    def delete(table_name):
+        nonlocal num_updated
+        if table_name in existing_tables:
+            table = dynamodb_resource.Table(table_name)
+            table.delete()
+            # Wait for the table to be deleted before exiting
+            print('Waiting for', table_name, '...')
+            waiter = dynamodb_client.get_waiter('table_not_exists')
+            waiter.wait(TableName=table_name)
+            num_updated += 1
+
+    existing_tables = dynamodb_client.list_tables()['TableNames']
+    delete(TBLOADERIDS_TABLE)
+
+    end_time = time.time()
+    print('Deleted {} tables in {:.2g} seconds'.format(num_updated, end_time - start_time))
+
 
 
 def create_tables():
@@ -169,7 +199,7 @@ def load_tbloaderids_table(data=None):
     for id, email, reserved in data:
         if email and id:
             max_id = max(id, max_id)
-            item = {TBL_EMAIL: email, TBL_ID: id, TBL_HEX_ID: '{:#06x}'.format(id), TBL_RESERVE: reserved + 1}
+            item = {TBL_EMAIL: email, TBL_ID: id, TBL_HEX_ID: '{:#06x}'.format(id), TBL_RESERVE: _round_up(reserved)}
             tbloadersid_table.put_item(Item=item)
             num_updated += 1
     if max_id > 0:
@@ -275,19 +305,20 @@ def merge():
 
     max_values = {}
     for x in MAXES:
-        num = x[0]
-        max_value = max([v for v in x[1:]])
-        max_values[num] = max_value
+        tbid = x[0]
+        max_values[tbid] = max(x[1:])
     existing_tbids = {}
     for x in EXISTING:
-        num = int(x[0])
+        tbid = int(x[0])
         email = x[2]
         if email:
-            max_value = max_values.get(num) or 1
-            existing_tbids[num] = (email, max_value)
+            max_value = max_values.get(tbid) or 1
+            existing_tbids[tbid] = (email, max_value)
 
-    for num in sorted(existing_tbids.keys()):
-        print('({}, "{}", {}),'.format(num, existing_tbids[num][0], existing_tbids[num][1]))
+    print('data = [')
+    for tbid in sorted(existing_tbids.keys()):
+        print('({}, "{}", {}),'.format(tbid, existing_tbids[tbid][0], existing_tbids[tbid][1]))
+    print(']')
 
     print(existing_tbids)
     print(max_values)
@@ -304,17 +335,19 @@ def open_tables():
 def allocate_tbid_item(claims):
     result = {STATUS: STATUS_FAILURE}
     email = claims.get('email')
+
+    # Be sure we are able to read the previously allocated tbloader id.
     max_loader = tbloadersid_table.get_item(Key={TBL_EMAIL: MAX_LOADER_KEY}, ConsistentRead=True)
     if not max_loader or 'Item' not in max_loader:
         result[MESSAGE] = 'Unable to read MAX_LOADER_KEY in tbloaderids'
         return result
-
     item = max_loader.get('Item')
     old_max_id = int(item.get(MAX_TB_LOADER, 0))
     if not old_max_id:
         result[MESSAGE] = 'Unable to retrieve max tbloader id from tbloaderids'
         return result
 
+    # Allocate the new tbloader id and build the tbloadersid table item
     new_max_id = old_max_id + 1
     new_item = {TBL_ID: new_max_id, TBL_HEX_ID: '{:04x}'.format(new_max_id), TBL_EMAIL: email, TBL_RESERVE: 1}
 
@@ -338,16 +371,24 @@ def allocate_tbid_item(claims):
         result[EXCEPTION] = str(err)
         return result
 
-    # Add the new tbloader id
+    # Add the new tbloader id on behalf of the signed-in user email address.
     tbloadersid_table.put_item(Item=new_item)
 
+    # Return the item in the result.
     result[STATUS] = STATUS_OK
     result['item'] = new_item
     return result
 
 
 def do_reserve(params, claims):
-
+    """
+    Reserve a block of TB serial numbers. If successful, returns a 'begin' and 'end', where begin
+    is the first new serial number and end is one past the highest allocated serial number.
+    :param params: from the application. We care about params['n'], the number of SRNs requested.
+    :param claims: from Cognito. We want the email address of the user.
+    :return: {status:'ok', begin:next_block, end:next_block+n, n:num_allocated, id:tbid, hexid:0xtbid}
+        or {status:'failure', message:'some error message'}
+    """
     result = {}
     num = int(params.get('n', DEFAULT_RESERVATION))
     email = claims.get('email')
