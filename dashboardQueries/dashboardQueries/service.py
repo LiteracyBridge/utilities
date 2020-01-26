@@ -79,7 +79,13 @@ choosable_columns = [
     'timestamp',
 
     'played_seconds',
-    'completions'
+    'completions',
+    'threequarters',
+    'half',
+    'quarter',
+    'started',
+
+    'tbcdid'
 ]
 
 implied_columns = {
