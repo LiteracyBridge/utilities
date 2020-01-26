@@ -69,7 +69,7 @@ def lambda_handler(event, context):
     :param context: object -- can be used to get runtime data (unused but required by AWS lambda)
     :return: a JSON string object that contains the status of transaction & information required by java program
     """
-
+    print(event)
     try:
         # parameters received from HTTPS POST request:
         api_version = event.get('api')

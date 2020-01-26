@@ -1,8 +1,9 @@
 PROJECT = checkout
 PYTHON = python3.7
-VIRTUAL_ENV = venv
+VIRTUAL_ENV = .acmCheckOutEnv
 FUNCTION_NAME = arn:aws:lambda:us-west-2:856701711513:function:acmCheckOut
-FUNCTION_HANDLER = lambda_handler
+FUNCTION_HANDLER = checkout.lambda_handler
+FUNCTION_DESCRIPTION = Add, remove, and query ACM checkout records.
 AWS_REGION = us-west-2
 LAMBDA_ROLE = arn:aws:iam::856701711513:role/lambda-statistics-query
 
@@ -49,3 +50,8 @@ zip:
 upload_lambda:
 	aws lambda update-function-code --function-name $(FUNCTION_NAME) --zip-file fileb://./package/$(PROJECT).zip
 
+create_lambda:
+	aws lambda create-function --function-name $(FUNCTION_NAME) \
+	--runtime $(PYTHON) --description "$(FUNCTION_DESCRIPTION)" \
+	--handler $(FUNCTION_HANDLER) --role $(FUNCTION_ROLE) \
+	--zip-file fileb://./package/$(PROJECT).zip
