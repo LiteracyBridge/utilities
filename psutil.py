@@ -258,7 +258,7 @@ def do_reconcilation(args):
         reconcilliation.reconcile(acmdir, prog_spec, args.strategy, update=updates, outdir=args.outdir)
         if XLSX in updates:
             print('Saving changes as {}'.format(outpath))
-            prog_spec.save_changes(True)
+            prog_spec.save_changes(outpath)
             #####
             # Sample of obtaining the bytes of the file.
             # xls_data = BytesIO()
