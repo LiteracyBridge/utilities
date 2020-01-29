@@ -1,5 +1,3 @@
-import sys
-
 import boto3
 
 REGION_NAME = 'us-west-2'
@@ -104,9 +102,10 @@ def token_generation_handler(event):
 # noinspection PyUnusedLocal
 def lambda_handler(event, context):
     print(event)
-    if event.get('triggerSource', '') == 'TokenGeneration_Authentication':
+    trigger = event.get('triggerSource', '')
+    if trigger == 'TokenGeneration_Authentication' or trigger == 'TokenGeneration_RefreshTokens':
         token_generation_handler(event)
-    elif event.get('triggerSource', '') == 'PreSignUp_SignUp':
+    elif trigger == 'PreSignUp_SignUp':
         pre_signup_handler(event)
 
     return event
@@ -148,9 +147,9 @@ if __name__ == '__main__':
 
         # Should get claims for known user.
         result = simulate('TokenGeneration_Authentication', 'demo@literacybridge.org')
-        view = result.get('response', {})\
-            .get('claimsOverrideDetails', {})\
-            .get('claimsToAddOrOverride', {})\
+        view = result.get('response', {}) \
+            .get('claimsOverrideDetails', {}) \
+            .get('claimsToAddOrOverride', {}) \
             .get('view', '')
         rc = 0 if 'DEMO' in view else 1
         rc_list.append(rc)
