@@ -1,0 +1,9 @@
+/build/
+/dist/
+.idea/
+.DS_Store
+__pycache__
+/winEnv/
+/msdos/
+insert.sh
+.virtual376/
