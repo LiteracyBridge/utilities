@@ -18,7 +18,7 @@ NOTE: To be uploaded and saved to AWS Console as lambda function 'acmCheckOut' f
 
 DynamoDB table schema:
 acm_check_out = {
-    acm_name: { type: String, primaryKey: true, required: true },   
+    acm_name: { type: String, primaryKey: true, required: true },
     acm_state: { type: String, required: false },
     acm_comment: { type: String, required: false },
     last_in_name: { type: String, required: false },
@@ -69,7 +69,7 @@ def lambda_handler(event, context):
     :param context: object -- can be used to get runtime data (unused but required by AWS lambda)
     :return: a JSON string object that contains the status of transaction & information required by java program
     """
-    print(event)
+
     try:
         # parameters received from HTTPS POST request:
         api_version = event.get('api')
@@ -838,11 +838,10 @@ def send_report(event):
     fromaddr = event.get('from') or 'ictnotifications@literacybridge.org'
     subject = event.get('subject')
     body = event.get('body')
-    recipient = event.get('to') or event.get('recipient') or 'ictnotifications@literacybridge.org'
-    recipients = recipient if isinstance(recipient, list) else [recipient]
+    recipient = event.get('to') or 'ictnotifications@literacybridge.org'
     html = event.get('html') or False
 
-    return send_ses(fromaddr, subject, body, recipients, html)
+    return send_ses(fromaddr, subject, body, recipient, html)
 
 
 # Format and send an ses message. Options are
@@ -851,7 +850,7 @@ def send_report(event):
 def send_ses(fromaddr,
              subject,
              body_text,
-             recipients,
+             recipient,
              html):
     """Send an email via the Amazon SES service.
 
@@ -873,7 +872,9 @@ def send_ses(fromaddr,
     response = client.send_email(
         Source=fromaddr,
         Destination={
-            'ToAddresses': recipients
+            'ToAddresses': [
+                recipient
+            ]
         },
         Message=message
     )
@@ -887,10 +888,10 @@ if __name__ == "__main__":
         for k, v in kwargs.items():
             args[k] = v
         if 'db' not in args:
-            args['db'] = 'ACM-TEST-NEW'
+            args['db'] = 'ACM-TEST'
         return lambda_handler(args, None)
 
-    print('Testing...')
+
     result = fn('dbcheck', db='ACM-TEST-NONE')
     print(result)
     result = fn('dbcheck')

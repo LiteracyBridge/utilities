@@ -1,10 +1,10 @@
-PROJECT = listAcmCheckouts
+PROJECT = roleHelper
 PYTHON = python3.8
-VIRTUAL_ENV = .lc_env
-FUNCTION_NAME = listAcmCheckouts
-FUNCTION_HANDLER = lambda_function.lambda_handler
+VIRTUAL_ENV = .virtualenv
+FUNCTION_NAME = roleHelper
+FUNCTION_HANDLER = lambda_handler
 FUNCTION_ROLE = arn:aws:iam::856701711513:role/lambda-checkout
-FUNCTION_DESCRIPTION = List check-out state of ACM projects.
+FUNCTION_DESCRIPTION = User role helper
 AWS_REGION = us-west-2
 
 # Default commands
@@ -39,18 +39,18 @@ remove_unused:
 	rm -rf ./package/tmp/botocore*
 	rm -rf ./package/tmp/boto3*
 	rm -rf ./package/tmp/s3transfer*
-	rm -rf ./package/tmp/jdcal*
-	rm -rf ./package/tmp/openpyxl*
-	rm -rf ./package/tmp/et_xmlfile*
 	rm -rf ./package/tmp/.gitignore
 	rm -rf ./package/tmp/.idea
 
+	rm -rf ./package/tmp/jdcal*
+	rm -rf ./package/tmp/openpyxl*
+	rm -rf ./package/tmp/pip*
+	rm -rf ./package/tmp/et_xmlfile*
+    
 	rm -rf ./package/tmp/awscli*
 	rm -rf ./package/tmp/colorama*
 	rm -rf ./package/tmp/rsa*
 	rm -rf ./package/tmp/pyasn1*
-
-	rm -rf ./package/tmp/pkg_resources*
 
 
 zip:

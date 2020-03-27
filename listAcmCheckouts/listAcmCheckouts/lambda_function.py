@@ -1,11 +1,11 @@
-import json
 import os
-import re
 import sys
 import time
 import traceback
 
+import amplio.rolemanager.manager as roles_manager
 import boto3
+from amplio.rolemanager.roles import *
 
 """
 Management of TB-Loader ids and serial numbers.
@@ -37,9 +37,12 @@ EXCEPTION = 'exception'
 STATUS_OK = 'ok'
 STATUS_FAILURE = 'failure'
 
+
 def open_tables():
     global acm_checkout_table
     acm_checkout_table = dynamodb_resource.Table(ACM_CHECKOUT_TABLE)
+    roles_manager.open_tables()
+
 
 # Given a project or ACM name, return just the project name part, uppercased. ACM-TEST -> TEST, test -> TEST
 def cannonical_acm_project_name(acmdir):
@@ -51,32 +54,27 @@ def cannonical_acm_project_name(acmdir):
         acm = acm[4:]
     return acm
 
-def _has_access(claims, project):
-    if 're' in claims:
-        regex = claims.get('re')
-    else:
-        view = claims.get('view')
-        edit = claims.get('edit')
-        re_str = view or ''
-        if re_str and edit:
-            re_str += '|'
-        re_str += (edit or '')
-        regex = re.compile(re_str, re.IGNORECASE)
-        claims['re'] = regex
-    return regex.match(project)
 
 def do_query(params, claims):
-    result = {}
+    def has_access(program: str):
+        if program in admin_targets:
+            return True
+        for uf in uf_targets:
+            if program.startswith(uf):
+                return True
+        return False
+
     email = claims.get('email')
+    programs = roles_manager.get_programs_for_user(email)
+    admin_targets = [k for k, v in programs.items() if SUPER_USER_ROLE in v or ADMIN_ROLE in v]
+    uf_targets = [x + '-FB-' for x in admin_targets]
 
     acms = []
-    checkouts =  acm_checkout_table.scan()['Items']
+    checkouts = acm_checkout_table.scan()['Items']
     for checkout in checkouts:
-        if _has_access(claims, cannonical_acm_project_name(checkout.get('acm_name'))):
+        if has_access(cannonical_acm_project_name(checkout.get('acm_name'))):
             acms.append(checkout)
 
-
-    # We return the old value. The caller can use old_value to old_value + n
     result = {STATUS: STATUS_OK, 'acms': acms}
     return result
 
@@ -100,8 +98,9 @@ def lambda_handler(event, context):
     query_string_params = event.get('queryStringParameters', {})
     print('Query string parameters: {}'.format(query_string_params))
 
-    claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
-
+    # claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
+    claims = event.get('claims', {})
+    print('Claims: {}'.format(claims))
 
     try:
         result = do_query(query_string_params, claims)

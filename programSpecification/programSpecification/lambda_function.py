@@ -61,6 +61,16 @@ RECIPIENTS_KEY = 'recipients.csv'
 CONTENT_JSON_KEY = 'content.json'
 CONTENT_CSV_KEY = 'content.csv'
 
+PARTS_FILES = [DEPLOYMENT_SPEC_KEY, TALKINGBOOK_MAP_KEY, RECIPIENTS_MAP_KEY,
+                     RECIPIENTS_KEY, CONTENT_JSON_KEY, CONTENT_CSV_KEY]
+FILE_ENCODINGS = {DEPLOYMENT_SPEC_KEY:'utf-8',
+                  TALKINGBOOK_MAP_KEY:'utf-8',
+                  RECIPIENTS_MAP_KEY:'utf-8',
+                  RECIPIENTS_KEY:'utf-8',
+                  CONTENT_JSON_KEY:'utf-8',
+                  CONTENT_CSV_KEY: 'utf-8-sig'}
+
+
 LIST_VERSION_KEYS = [CURRENT_PROGSPEC_KEY, PENDING_PROGSPEC_KEY]
 
 STATUS_OK = 'ok'
@@ -196,22 +206,26 @@ def _extract_parts(project: str, versionid: str):
 
     # Write the individual files to S3
     key = project_key(project, CONTENT_CSV_KEY)
-    objdata = exporter.get_content_csv().getvalue().encode('utf-8-sig')
+    encoding = FILE_ENCODINGS.get(CONTENT_CSV_KEY, 'utf-8')
+    objdata = exporter.get_content_csv().getvalue().encode(encoding)
     put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
     _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
 
     key = project_key(project, CONTENT_JSON_KEY)
-    objdata = exporter.get_content_json().encode('utf-8')
+    encoding = FILE_ENCODINGS.get(CONTENT_JSON_KEY, 'utf-8')
+    objdata = exporter.get_content_json().encode(encoding)
     put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
     _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
 
     key = project_key(project, RECIPIENTS_KEY)
-    objdata = exporter.get_recipients_csv().getvalue().encode('utf-8')
+    encoding = FILE_ENCODINGS.get(RECIPIENTS_KEY, 'utf-8')
+    objdata = exporter.get_recipients_csv().getvalue().encode(encoding)
     put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
     _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
 
     key = project_key(project, RECIPIENTS_MAP_KEY)
-    objdata = exporter.get_recipients_map_csv().getvalue().encode('utf-8')
+    encoding = FILE_ENCODINGS.get(RECIPIENTS_MAP_KEY, 'utf-8')
+    objdata = exporter.get_recipients_map_csv().getvalue().encode(encoding)
     # Recipients map may be empty, in which case do not store it.
     if len(objdata) > 0:
         put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
@@ -220,7 +234,8 @@ def _extract_parts(project: str, versionid: str):
         _delete_versions(key)
 
     key = project_key(project, TALKINGBOOK_MAP_KEY)
-    objdata = exporter.get_talkingbook_map_csv().getvalue().encode('utf-8')
+    encoding = FILE_ENCODINGS.get(TALKINGBOOK_MAP_KEY, 'utf-8')
+    objdata = exporter.get_talkingbook_map_csv().getvalue().encode(encoding)
     # Talkingbook map may be empty...
     if len(objdata) > 0:
         put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
@@ -229,7 +244,8 @@ def _extract_parts(project: str, versionid: str):
         _delete_versions(key)
 
     key = project_key(project, DEPLOYMENT_SPEC_KEY)
-    objdata = exporter.get_deployments_csv().getvalue().encode('utf-8')
+    encoding = FILE_ENCODINGS.get(DEPLOYMENT_SPEC_KEY, 'utf-8')
+    objdata = exporter.get_deployments_csv().getvalue().encode(encoding)
     put_result = s3.put_object(Body=objdata, Bucket=bucket, Metadata=metadata, Key=key)
     _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
 
@@ -291,6 +307,8 @@ def get_s3_params_and_obj_info(project: str, version: str) -> (object, object):
         key = project_key(project, CURRENT_PROGSPEC_KEY)
     elif version == 'pending':
         key = project_key(project, PENDING_PROGSPEC_KEY)
+    elif version in PARTS_FILES:
+        key = project_key(project, version)
     else:
         key = project_key(project, CURRENT_PROGSPEC_KEY)
         params['VersionId'] = version
@@ -338,8 +356,11 @@ def do_getfile(params, claims):
     params, obj_info = get_s3_params_and_obj_info(project, version)
 
     obj = s3.get_object(**params)
-    bin_data = obj.get('Body').read()
-    data = binascii.b2a_base64(bin_data).decode('ascii')
+    if version in FILE_ENCODINGS:
+        data = obj.get('Body').read().decode(FILE_ENCODINGS[version])
+    else:
+        bin_data = obj.get('Body').read()
+        data = binascii.b2a_base64(bin_data).decode('ascii')
     return {'status': STATUS_OK, 'data': str(data), 'object': obj_info, 'version': version}
 
 
@@ -676,32 +697,45 @@ if __name__ == '__main__':
                 print('{}: {}'.format(f, st))
             return list_result
 
+        def test_get(version='current'):
+            print('\nGet {}\n'.format(version))
+            event = {'requestContext': {'authorizer': {'claims': claims}},
+                     'pathParameters': {'proxy': 'getfile'}, 'queryStringParameters': {'project': 'TEST', 'version': version}
+                     }
+            result = lambda_handler(event, {})
+            return result
+
+
+
         claims = {'edit': '.*', 'view': '.*', 'email': 'bill@amplio.org'}
         print('Just testing')
 
         obj_list = test_list()
 
-        pending_id = test_submit('~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx',
-                                 comment='First test program spec.')
-        obj_list = test_list()
+        # pending_id = test_submit('~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx',
+        #                          comment='First test program spec.')
+        # obj_list = test_list()
+        #
+        # current_id = test_approve(current=obj_list.get('CurrentId'), pending=pending_id,
+        #                           comment='First approved program specification')
+        # obj_list = test_list()
+        #
+        # pending_id = test_submit('~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification-updated.xlsx',
+        #                          comment='Second submitted program spec.')
+        # obj_list = test_list()
+        # test_diff('current', 'pending')
+        # test_diff('current', '~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx')
+        # test_diff('pending', 'current')
+        #
+        # current_id = test_approve(current=current_id, pending=pending_id, comment='Second approved program spec.')
+        # obj_list = test_list()
+        #
+        # pending_id = test_submit('~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx',
+        #                          comment='Third submitted program spec.')
+        # obj_list = test_list()
 
-        current_id = test_approve(current=obj_list.get('CurrentId'), pending=pending_id,
-                                  comment='First approved program specification')
-        obj_list = test_list()
-
-        pending_id = test_submit('~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification-updated.xlsx',
-                                 comment='Second submitted program spec.')
-        obj_list = test_list()
-        test_diff('current', 'pending')
-        test_diff('current', '~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx')
-        test_diff('pending', 'current')
-
-        current_id = test_approve(current=current_id, pending=pending_id, comment='Second approved program spec.')
-        obj_list = test_list()
-
-        pending_id = test_submit('~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx',
-                                 comment='Third submitted program spec.')
-        obj_list = test_list()
+        get_result = test_get('content.csv')
+        get_result = test_get('recipients.csv')
 
 
     __test__()

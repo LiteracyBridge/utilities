@@ -1,6 +1,6 @@
 PROJECT = programSpecification
-PYTHON = python3.7
-VIRTUAL_ENV = vprogspec
+PYTHON = python3.8
+VIRTUAL_ENV = .ps_env
 FUNCTION_NAME = programSpecification
 FUNCTION_HANDLER = lambda_handler
 AWS_REGION = us-west-2
@@ -16,7 +16,7 @@ helper:
 
 virtual:
 	@echo "--> Setup and activate virtualenv"
-	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv $(VIRTUAL_ENV); fi
+	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv --system-site-packages $(VIRTUAL_ENV); fi
 	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
 
 upgrade:

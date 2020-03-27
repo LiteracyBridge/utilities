@@ -44,11 +44,11 @@ def get_user_access(email):
         user_info = acm_user.get('Item')
         # If the user's organization isn't in the table, give them no access at all.
         if not user_info:
-            user_info = {'edit': '', 'view': '', 'admin': 'false'}
+            user_info = {'edit': '', 'view': '', 'admin': False}
 
     user_access = {'edit': user_info.get('edit', ''),
                    'view': user_info.get('view', ''),
-                   'admin': user_info.get('admin', 'false')
+                   'admin': user_info.get('admin', False)
                    }
     print('Access for user {}: {}'.format(email, user_access))
     return user_access
@@ -113,6 +113,7 @@ def lambda_handler(event, context):
 
 # region Testing Code
 if __name__ == '__main__':
+    import sys
     def simulate(trigger: str, email: str):
         event = {'triggerSource': trigger, 'request': {'userAttributes': {'email': email}}}
         result = None
