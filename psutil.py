@@ -175,7 +175,7 @@ def new_xlsx_name(inpath, outdir, outpath):
     if len(xls_dir) > 0 and xls_dir[-1] != '/':
         xls_dir += '/'
     name, ext = os.path.splitext(fn)
-    n = ''
+    n = '1'
     sequence = 0
     if '{N}' in outpath:
         # If the name already ends in a number, remove it from name, and use as a starting point
@@ -185,6 +185,7 @@ def new_xlsx_name(inpath, outdir, outpath):
                 trailing = name[-1:] + trailing
                 name = name[:-1]
             sequence = int(trailing)
+            n = str(sequence+1)
         # Find a unique name by incrementing N
         while Path(
                 os.path.expanduser(outpath.format(outdir=outdir, dir=xls_dir, name=name, ext=ext, N=n))).exists():
@@ -316,7 +317,7 @@ def main():
                                   help='What strategy was used in creating directory names?',
                                   choices=[0, 1, 2, 3, 4])
     reconcile_parser.add_argument('--update', '-u', metavar='itm', default='', nargs='*',
-                                  choices=['dirs', 'xdirs', 'xlsx', 'recipientids'],
+                                  choices=['directories', 'xdirs', 'xlsx', 'recipientids'],
                                   help='What items should be updated? Choices are "{}"'.format(updatables))
     reconcile_parser.set_defaults(func=do_reconcilation)
 
@@ -331,27 +332,8 @@ def main():
     diff_parser.add_argument('xlsx2', metavar='XLSX', action=store_path, help='The new spreadsheet.')
     diff_parser.set_defaults(func=do_diff)
 
-    # arg_parser.add_argument('command', choices=['validate', 'reconcile', 'export', 'diff'])
-    # arg_parser.add_argument('--spec', '--program-spec', metavar='XLSX',
-    #                         help='Name of the Program Specification spreadsheet.')
-    # arg_parser.add_argument('--acm', help='Name of the ACM project.')
-    # arg_parser.add_argument('--dropbox', default='~/Dropbox', help='Dropbox directory (default is ~/Dropbox).')
-    # arg_parser.add_argument('--out', metavar='XLSX', nargs='?', default='{dir}{name}-new{ext}',
-    #                         const='{dir}{name}-new{ext}', help='Create a new, updated Program Specification. An '
-    #                                                            'optional filename may be specified. Deafult is the '
-    #                                                            'original name with "-new" appended. A format string '
-    #                                                            'with {outdir}, {dir}, {name}, and {ext} substitutions '
-    #                                                            'may be supplied.')
-    # arg_parser.add_argument('--outdir', action=StoreDirectory, default='.', metavar='DIR',
-    #                         help='Directory for output files (default ".")')
-    # arg_parser.add_argument('--strategy', type=int, default=4,
-    #                         help='What strategy was used in creating directory names?',
-    #                         choices=[0, 1, 2, 3, 4])
-    # arg_parser.add_argument('--update', '-u', metavar='itm', default='', nargs='*', choices=updatables,
-    #                         help='What items should be updated? Choices are "{}"')
-    # arg_parser.add_argument('--verbose', '-v', action='count', help='Provide more verbose output.')
-    # arg_parser.add_argument('--diff', metavar='XLSX2', help='List changes from this spec sheet.')
     args = arg_parser.parse_args()
+
     args.func(args)
 
 
