@@ -1,3 +1,5 @@
+import json
+
 from . import programspec
 
 
@@ -25,8 +27,39 @@ class SpecDiff:
         b_depls = self.b.deployment_numbers
         self.common_depls = [x for x in a_depls if x in b_depls]
 
-    def pr(self, str):
-        self.result.append(str)
+
+_DIFF_SPECS = {
+    programspec.Program.__name__: {'title': '{type}: {str}',
+                                   'attributes': ['affiliate', 'partner', 'program', 'project'],
+                                   'children': ['deployments', 'components']},
+    programspec.Deployment.__name__: {'title': '{type}: {str}',
+                                      'attributes': ['number', 'start_date', 'end_date'],
+                                      'children': ['playlists']},
+    programspec.Playlist.__name__: {'title': '{type}: {str}',
+                                    'attributes': ['title'],
+                                    'children': ['messages']},
+    programspec.Message.__name__: {'title': '{str}',
+                                   'attributes': ['title', 'key_points', 'default_category', 'sdg_goals',
+                                                  'sdg_targets', 'filters'],
+                                   'children': []},
+    programspec.Component.__name__: {'title': '{type}: {str}',
+                                     'attributes': ['name'],
+                                     'children': ['recipients']},
+    programspec.Recipient.__name__: {'title': '{name}',
+                                     'attributes': ['country', 'region', 'district', 'community', 'group_name', 'agent',
+                                                    'support_entity', 'model', 'language_code', 'recipientid',
+                                                    'directory_name',
+                                                    'variant', 'num_hhs', 'num_tbs'],
+                                     'children': []}
+}
+
+
+class SpecDiffPrint(SpecDiff):
+    def __init__(self, a: programspec.Program, b: programspec.Program):
+        super().__init__(a, b)
+
+    def pr(self, st):
+        self.result.append(st)
 
     def pr_diff(self, name, a, b):
         if a != b:
@@ -56,13 +89,14 @@ class SpecDiff:
         if a_recips.keys() != b_recips.keys():
             added = [x for x in b_recips.keys() if x not in a_recips]
             removed = [x for x in a_recips.keys() if x not in b_recips]
-            for id in added:
-                self.pr("Recipient added: {}, '{}'".format(id, b_recips[id]))
-            for id in removed:
-                self.pr("Recipient removed: {}, '{}'".format(id, a_recips[id]))
+            for recip_id in added:
+                self.pr("Recipient added: {}, '{}'".format(recip_id, b_recips[recip_id]))
+            for recip_id in removed:
+                self.pr("Recipient removed: {}, '{}'".format(recip_id, a_recips[recip_id]))
         fields = [x for x in programspec.RECIPIENT_FIELDS if x != 'row_num']
-        for id in common_recipids:
-            self._diff_obj(a_recips[id], b_recips[id], fields, "Recipient '" + str(a_recips[id]) + "'")
+        for recip_id in common_recipids:
+            self._diff_obj(a_recips[recip_id], b_recips[recip_id], fields,
+                           "Recipient '" + str(a_recips[recip_id]) + "'")
 
     # Differences in a message
     def diff_message(self, a_message, b_message):
@@ -174,3 +208,129 @@ class SpecDiff:
         self.diff_recipients()
 
         return self.result
+
+
+class SpecDiffDelta(SpecDiff):
+    def __init__(self, a: programspec.Program, b: programspec.Program):
+        super().__init__(a, b)
+
+    def pr(self, st):
+        self.result.append(st)
+
+    def pr_diff(self, name, a, b):
+        if a != b:
+            self.pr('{} changed from {} to {}'.format(name, a, b))
+
+    @staticmethod
+    def _print_object(obj):
+        type_name = type(obj).__name__
+        if type_name not in _DIFF_SPECS:
+            return str(obj)
+        diff_spec = _DIFF_SPECS[type_name]
+        return diff_spec.get('title', '{type}: {str}').format(type=type_name, str=str(obj), name=(obj.__name__ or None))
+
+    def _compare_collections(self, a, b):
+        def compare_dict():
+            """
+            Given two dictionaries, compare their contents. Items may have been removed from 'a',
+            added to 'b', or changed 'a'->'b'. Since there is no intrinsic order in a dict, we
+            can sort the keys and walk both lists looking for additions, deletions, and changes.
+            """
+            keys_a = sorted(a.keys())
+            keys_b = sorted(b.keys())
+            ix_a = 0
+            ix_b = 0
+            while ix_a < len(keys_a) and ix_b < len(keys_b):
+                if keys_a[ix_a] == keys_b[ix_b]:
+                    # keys are the same, compare the objects
+                    obj_delta = self._compare_objects(a.get(keys_a[ix_a]), b.get(keys_b[ix_b]))
+                    if obj_delta is not None:
+                        delta.setdefault('changed', []).append((self._print_object(a.get(keys_a[ix_a])), obj_delta))
+                    ix_a += 1
+                    ix_b += 1
+                elif keys_a[ix_a] < keys_b[ix_b]:
+                    # In a, but not b, so "removed".
+                    delta.setdefault('removed', []).append(self._print_object(a.get(keys_a[ix_a])))
+                    ix_a += 1
+                else:
+                    # In b, but not a, so "added"
+                    delta.setdefault('added', []).append(self._print_object(b.get(keys_b[ix_b])))
+                    ix_b += 1
+            # Removals from a, keys sort higher than all keys in b.
+            while ix_a < len(keys_a):
+                delta.setdefault('removed', []).append(self._print_object(a.get(keys_a[ix_a])))
+                ix_a += 1
+            # Additions to b, keys sort higher than all keys in a.
+            while ix_b < len(keys_b):
+                delta.setdefault('added', []).append(self._print_object(b.get(keys_b[ix_b])))
+                ix_b += 1
+
+        def compare_list():
+            """
+            Given two lists, compare their contents. Order matters in lists, but this doesn't really show
+            changes in ordering.
+            """
+            a_map = {x.__name__: x for x in a}
+            a_names = [x.__name__ for x in a]
+            b_map = {x.__name__: x for x in b}
+            b_names = [x.__name__ for x in b]
+
+            a_only = [x for x in a_names if x not in b_names]
+            b_only = [x for x in b_names if x not in a_names]
+            common = [x for x in b_names if x in a_names]
+            if len(a_only) > 0:
+                delta['removed'] = [self._print_object(x) for x in a if x.__name__ in a_only]
+            if len(b_only) > 0:
+                delta['added'] = [self._print_object(x) for x in b if x.__name__ in b_only]
+            for name in common:
+                obj_a = a_map[name]
+                obj_b = b_map[name]
+                obj_delta = self._compare_objects(obj_a, obj_b)
+                if obj_delta:
+                    delta.setdefault('changed', []).append((self._print_object(obj_a), obj_delta))
+
+        delta = {}
+        # If they're lists, look for same items in same order.
+        if type(a) == list:
+            compare_list()
+
+        elif type(a) == dict:
+            compare_dict()
+
+        elif type(a) == set:
+            pass
+
+        if len(delta.keys()) == 0:
+            return None
+        return delta
+
+    def _compare_objects(self, a, b):
+        delta = {}
+        if type(a) != type(b):
+            delta['diff'] = '{} and {} are different types'.format(str(a), str(b))
+        else:
+            diff_spec = _DIFF_SPECS[type(a).__name__]
+            for attr_name in diff_spec['attributes']:
+                attr_a = str(getattr(a, attr_name, None))
+                attr_b = str(getattr(b, attr_name, None))
+                if attr_a != attr_b:
+                    delta.setdefault('attributes', {})[attr_name] = (attr_a, attr_b)
+            for child_name in diff_spec['children']:
+                children_a = getattr(a, child_name, None)
+                children_b = getattr(b, child_name, None)
+                child_delta = self._compare_collections(children_a, children_b)
+                if child_delta:
+                    if len(diff_spec['children']) > 1:
+                        delta[child_name] = child_delta
+                    else:
+                        delta.update(child_delta)
+
+        if len(delta.keys()) == 0:
+            return None
+        return delta
+
+    def diff(self):
+        prog_delta = self._compare_objects(self.a, self.b)
+
+        print(json.dumps(prog_delta))
+        return prog_delta

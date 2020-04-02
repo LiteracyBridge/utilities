@@ -2,7 +2,6 @@ PROJECT = psutil
 PYTHON = python3.7
 # pyinstaller does not yet (2020-04-01) work with python 3.8
 VIRTUAL_ENV = .virtual376
-FUNCTION_NAME = programSpecification
 
 # Default commands
 help: helper
@@ -21,6 +20,6 @@ build_package_tmp:
 # 	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
 
 upgrade:
-	pip3 install --upgrade programspec	
+	pip3 install --upgrade amplio
 
 

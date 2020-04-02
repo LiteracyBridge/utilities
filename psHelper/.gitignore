@@ -1,3 +1,4 @@
 .ps_env/
 *.xlsx
 package
+.psHelpEnv/

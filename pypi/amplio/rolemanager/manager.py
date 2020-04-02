@@ -99,10 +99,6 @@ def add_roles_to_program(program: str, roles_dict: Dict[str, str]):
         rolesdb.put_program_item(item=program_record)
 
 
-orgs_items_cache: Dict[str, object] = {}
-programs_items_cache: Dict[str, object] = {}
-
-
 def invalidate_caches():
     rolesdb.invalidate_caches()
 
@@ -157,20 +153,13 @@ def get_roles_for_user_in_organization(email: str, org: str) -> str:
 
 # Given an organization, gets the roles defined directly by the organization, and any inherited from
 # any supporting organization(s).
-org_role_cache = {}
-
-
 def get_roles_for_organization(org: str) -> Dict[str, str]:
     if not org:
         return {}
-    if org in org_role_cache:
-        return org_role_cache[org]
-
     org_record = rolesdb.get_organization_items().get(org, {})
     org_roles: Dict[str, str] = org_record.get(ORGS_ROLES_FIELD, {})
     admin_org_roles: Dict[str, str] = get_roles_for_organization(org_record.get(ORGS_PARENT_FIELD))
     roles_dict = _merge_roles_dicts(org_roles, admin_org_roles)
-    org_role_cache[org] = roles_dict
     return roles_dict
 
 

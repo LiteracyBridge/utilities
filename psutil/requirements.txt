@@ -1,4 +1,5 @@
 altgraph==0.16.1
+amplio
 et-xmlfile==1.0.1
 future==0.17.1
 fuzzywuzzy==0.17.0
@@ -6,6 +7,5 @@ jdcal==1.4
 macholib==1.11
 openpyxl==2.6.2
 pefile==2018.8.8
-programspec
 PyInstaller>=3.6
 python-Levenshtein==0.12.0

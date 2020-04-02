@@ -1,6 +1,6 @@
-from programspec.recipient_utils import RecipientUtils
+from .recipient_utils import RecipientUtils
 
-from programspec import programspec, errors
+from . import programspec, errors
 
 class Validator():
     def __init__(self, progspec: programspec, **kwargs):

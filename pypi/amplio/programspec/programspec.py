@@ -70,6 +70,10 @@ class Program:
         self.affiliate = reader.general_info.get('affiliate')
 
 
+    @property
+    def __name__(self):
+        return str(self.program)
+
     def __repr__(self):
         result = '{} ({})'.format(self.program, self.partner)
         if self.deployments:
@@ -242,6 +246,10 @@ class Deployment:
     def deployment_info(self):
         return DeploymentInfo(self)
 
+    @property
+    def __name__(self):
+        return str(self.number)
+
     def __repr__(self):
         return '# {}, {:%y-%b-%d} - {:%y-%b-%d}'.format(self.number, self.start_date, self.end_date)
 
@@ -408,6 +416,11 @@ class Component:
         for recip in self._recipients:
             recip.save_changes(reader)
 
+    @property
+    def __name__(self):
+        return str(self.name)
+
+
 
 # Represents a recipient in a TB program.
 class Recipient:
@@ -466,6 +479,10 @@ class Recipient:
         else:
             super().__setattr__(name, value)
 
+    @property
+    def __name__(self):
+        return str(self)+':'+str(self.recipientid)
+
     def save_changes(self, reader):
         for name in self._tracker:
             reader.store_value(self.containing_component.name, self._properties['row_num'], name,
@@ -488,6 +505,15 @@ class Playlist:
     @property
     def messages(self):
         return self._messages
+
+    @property
+    def __name__(self):
+        return str(self.title)
+
+    def __repr__(self):
+        return str(self.title)
+
+
 
 
 # This recognizes 'd' or 'd.d'. To recognize 'd.d.d', change the ? to {0,2}.
@@ -539,6 +565,18 @@ class Message:
     # Does this message's filter accept the given criteria?
     def accepts(self, criteria):
         return self._filterset.accepts(criteria)
+
+    @property
+    def __name__(self):
+        return str(self.title)
+
+    def __repr__(self):
+        result = self.title
+        if self.sdg_goals:
+            result += ', sdg {}/{}'.format(self.sdg_goals, self.sdg_targets)
+        if len(self._filterset) > 0:
+            result += ', filt {}'.format(self._filterset)
+        return str(self.title)
 
 
 # A class that matches against a set of one or more comma-separated values. A leading ~ means 'not one of these'.

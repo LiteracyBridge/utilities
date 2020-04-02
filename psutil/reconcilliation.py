@@ -6,8 +6,8 @@ from pathlib import Path
 
 from fuzzywuzzy import fuzz
 
-from programspec import errors, programspec
-from programspec.programspec_constants import DIRECTORIES, XDIRECTORIES, XLSX, RECIPIENTS
+from amplio.programspec import errors, programspec
+from amplio.programspec.programspec_constants import DIRECTORIES, XDIRECTORIES, XLSX, RECIPIENTS
 from recipient_file_utils import RecipientFileUtils
 
 # In this module is it very useful to refer to recipients by (community, group, agent). For that purpose,

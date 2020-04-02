@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from programspec import programspec
-from programspec.exporter import Exporter
+from amplio.programspec import programspec
+from amplio.programspec.exporter import Exporter
 
 from recipient_file_utils import RecipientFileUtils
 

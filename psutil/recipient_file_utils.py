@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-from programspec import programspec
-from programspec.recipient_utils import RecipientUtils
+from amplio.programspec import programspec
+from amplio.programspec.recipient_utils import RecipientUtils
 
 
 class RecipientFileUtils(RecipientUtils):

@@ -1,6 +1,6 @@
 PROJECT = roleHelper
 PYTHON = python3.8
-VIRTUAL_ENV = .virtualenv
+VIRTUAL_ENV = .roleHelperEnv
 FUNCTION_NAME = roleHelper
 FUNCTION_HANDLER = lambda_handler
 FUNCTION_ROLE = arn:aws:iam::856701711513:role/lambda-checkout

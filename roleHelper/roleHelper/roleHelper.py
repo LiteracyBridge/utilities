@@ -73,7 +73,7 @@ def lambda_handler(event, context):
         print('body length {}, data: {}'.format(len(body), body))
     except Exception as ex:
         data = ''
-        print('exception getting body lenght')
+        print('exception getting body length')
 
     print('Action: {}'.format(action))
 

@@ -1,6 +1,7 @@
 import time
 
 import boto3
+
 """
 Roles Database interface.
 
@@ -29,6 +30,8 @@ PROGRAMS_TABLE = 'programs'
 PROGRAMS_PROGRAM_FIELD = 'program'
 PROGRAMS_ORG_FIELD = 'organization'
 PROGRAMS_ROLES_FIELD = 'roles'
+
+_CACHE_TIMEOUT_SECONDS = 30
 
 _PROGRAMS_TABLE_CREATE_ARGS = {
     'TableName': PROGRAMS_TABLE,
@@ -62,7 +65,9 @@ class RolesDb:
         self._organizations_table = None
         self._programs_table = None
         self._organizations_items_cache = {}
+        self._organizations_items_cache_expiry = 0
         self._programs_items_cache = {}
+        self._programs_items_cache_expiry = 0
 
         if kwargs.get('delete_tables', False):
             self._delete_tables()
@@ -149,16 +154,20 @@ class RolesDb:
         """
         Empties the cache. Will be re-filled with the next request.
         """
-        self._organizations_items_cache = []
-        self._programs_items_cache = []
+        self._organizations_items_cache = {}
+        self._organizations_items_cache_expiry = 0
+        self._programs_items_cache = {}
+        self._programs_items_cache_expiry = 0
 
     def get_organization_items(self):
         """
         Gets the list of organization items from the database. The list is cached for performance.
         """
-        if len(self._organizations_items_cache) == 0:
+        if time.time() > self._organizations_items_cache_expiry:
+            print('Caching organizations items')
             self._organizations_items_cache = {x[ORGS_ORGANIZATION_FIELD]: x for x in
                                                self._organizations_table.scan()['Items']}
+            self._organizations_items_cache_expiry = time.time() + _CACHE_TIMEOUT_SECONDS
         return self._organizations_items_cache
 
     def put_organization_item(self, item=None):
@@ -175,8 +184,10 @@ class RolesDb:
         """
         Gets the list of program items. The list is cached for performace.
         """
-        if len(self._programs_items_cache) == 0:
+        if time.time() > self._programs_items_cache_expiry:
+            print('Caching program items')
             self._programs_items_cache = {x[PROGRAMS_PROGRAM_FIELD]: x for x in self._programs_table.scan()['Items']}
+            self._programs_items_cache_expiry = time.time() + _CACHE_TIMEOUT_SECONDS
         return self._programs_items_cache
 
     def put_program_item(self, item=None):

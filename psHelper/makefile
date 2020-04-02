@@ -1,6 +1,6 @@
 PROJECT = programSpecification
 PYTHON = python3.8
-VIRTUAL_ENV = .ps_env
+VIRTUAL_ENV = .psHelpEnv
 FUNCTION_NAME = programSpecification
 FUNCTION_HANDLER = lambda_handler
 AWS_REGION = us-west-2
@@ -20,7 +20,7 @@ virtual:
 	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
 
 upgrade:
-	pip3 install --extra-index-url http://localhost:8000 --upgrade programspec	
+	pip3 install --upgrade amplio
 
 sync:
 	rsync -av  ../../progspec/programspec/*.py  programSpecification/programspec/

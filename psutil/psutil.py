@@ -2,15 +2,13 @@
 import argparse
 import os
 import sys
-from io import StringIO, BytesIO
 from os.path import expanduser
 from pathlib import Path
 
-from programspec import errors, spreadsheet, programspec
-from programspec.programspec_constants import DIRECTORIES, XDIRECTORIES, XLSX, RECIPIENTS
-from programspec.specdiff import SpecDiff
-from programspec.utils import KeyWords
-from programspec.validator import Validator
+from amplio.programspec import errors, spreadsheet, programspec
+from amplio.programspec.programspec_constants import DIRECTORIES, XDIRECTORIES, XLSX, RECIPIENTS
+from amplio.programspec.specdiff import SpecDiffDelta
+from amplio.programspec.validator import Validator
 
 import file_exporter
 import reconcilliation
@@ -133,6 +131,8 @@ Commands:
 """
 
 ENSURE_TRAILING_SLASH = ['--outdir']
+
+
 class store_path(argparse.Action):
     def __init__(self, option_strings, dest, nargs=None, **kwargs):
         if nargs is not None:
@@ -185,7 +185,7 @@ def new_xlsx_name(inpath, outdir, outpath):
                 trailing = name[-1:] + trailing
                 name = name[:-1]
             sequence = int(trailing)
-            n = str(sequence+1)
+            n = str(sequence + 1)
         # Find a unique name by incrementing N
         while Path(
                 os.path.expanduser(outpath.format(outdir=outdir, dir=xls_dir, name=name, ext=ext, N=n))).exists():
@@ -213,6 +213,7 @@ def _validate(xlsx):
         ps = programspec.get_program_spec_from_spreadsheet(ss, cannonical_acm_project_name(args.acm))
     return ss, ps
 
+
 def do_diff(args):
     file = expanduser(args.xlsx)
     ss1 = spreadsheet.load(file)
@@ -222,7 +223,7 @@ def do_diff(args):
     ss2 = spreadsheet.load(file2)
     ps2 = programspec.get_program_spec_from_spreadsheet(ss2, cannonical_acm_project_name(args.acm))
 
-    specdiff = SpecDiff(ps1, ps2)
+    specdiff = SpecDiffDelta(ps1, ps2)
     diffs = specdiff.diff()
     if len(diffs) > 0:
         print('Differences found:')
@@ -280,7 +281,6 @@ def do_exports(args):
         acmdir = Path(cannonical_acm_path_name(args.acm))
         exporter = file_exporter.FileExporter(acmdir, prog_spec, outdir=args.outdir)
         exporter.export()
-
 
 
 def main():
