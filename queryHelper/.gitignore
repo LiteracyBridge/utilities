@@ -2,3 +2,4 @@ venv
 package
 __pycache__
 .vscode
+.queryHelperEnv/

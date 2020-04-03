@@ -3,32 +3,55 @@ import base64
 import csv
 import io
 import json
-import re
 import time
 
 import boto3
 import psycopg2
+from amplio.rolemanager import manager
 from botocore.exceptions import ClientError
+
 # import requests
 from utils.SimpleQueryValidator import SimpleQueryValidator, QueryColumn
 
 db_connection = None
 debug = False
 
+manager.open_tables()
+
+
 class TableAccessChecker:
     def __init__(self, event):
-        self._edit = ''
-        self._view = 'DEMO'
+        self._email = ''
+        # self._edit = ''
+        # self._view = 'DEMO'
         if 'requestContext' in event and 'authorizer' in event['requestContext']:
             claims = event['requestContext']['authorizer'].get('claims', {})
-            self._edit = claims.get('edit', '')
-            self._view = claims.get('view', 'DEMO')
+            self._email = claims.get('email')
+            # roles_str = manager.get_roles_for_user_in_program(email, program)
+            # print('Roles for {} in {}: {}'.format(email, program, roles_str))
+            # return manager.Roles.PM_ROLE in roles_str
+            # return roles_str is not None and len(roles_str) > 0
+            #
+            print('claims: {}'.format(claims))
+            # self._edit = claims.get('edit', '')
+            # self._view = claims.get('view', 'DEMO')
+        else:
+            print('No claims!')
 
-    def can_view(self, project):
-        return re.match(self._view, project) or re.match(self._edit, project)
+    def can_view(self, program):
+        roles_str = manager.get_roles_for_user_in_program(self._email, program)
+        print('Roles for {} in {}: {}'.format(self._email, program, roles_str))
+        return manager.Roles.ADMIN_ROLE in roles_str or manager.Roles.PM_ROLE in roles_str or \
+               manager.Roles.CONTENT_OFFICER_ROLE in roles_str or manager.Roles.FIELD_OFFICER_ROLE in roles_str
+        # return roles_str is not None and len(roles_str) > 0
+        # return re.match(self._view, project) or re.match(self._edit, project)
 
-    def can_edit(self, project):
-        return re.match(self._edit, project)
+    def can_edit(self, program):
+        roles_str = manager.get_roles_for_user_in_program(self._email, program)
+        print('Roles for {} in {}: {}'.format(self._email, program, roles_str))
+        return manager.Roles.ADMIN_ROLE in roles_str or manager.Roles.PM_ROLE in roles_str
+        # return roles_str is not None and len(roles_str) > 0
+        # return re.match(self._edit, project)
 
 
 accessChecker = TableAccessChecker('')
@@ -113,6 +136,7 @@ CREATE OR REPLACE TEMP VIEW temp_usage AS (
 '''
 
 temp_view = 'temp_usage'
+
 
 # Get the user name and password that we need to sign into the SQL database. Configured through AWS console.
 def get_secret():
@@ -212,21 +236,25 @@ def get_usage_params(request):
     return params
 
 
-def get_usage(request):
+def get_usage(request, claims):
     start = time.time_ns()
     usage_params = get_usage_params(request)
     if 'error' in usage_params:
         end = time.time_ns()
         return {'error': usage_params['error'], 'msec': (end - start) / 1000000}
 
+    program = usage_params.get('program') if 'program' in usage_params else usage_params.get('project')
+    if not accessChecker.can_view(program):
+        return ({'error': 'Access denied'})
+
     make_db_connection()
     cur = db_connection.cursor()
 
     # Create a convenience view limited to the data of interest.
     if usage_params['deployment']:
-        cur.execute(view_query_depl, (usage_params['project'], usage_params['deployment']))
+        cur.execute(view_query_depl, (program, usage_params['deployment']))
     else:
-        cur.execute(view_query, (usage_params['project'],))
+        cur.execute(view_query, (program,))
 
     # Run the query
     num_rows = 0
@@ -315,6 +343,9 @@ def lambda_handler(event, context):
     global accessChecker
     accessChecker = TableAccessChecker(event)
     request = request_from_event(event)
+
+    claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
+
     result = {}
 
     # temp
@@ -326,8 +357,9 @@ def lambda_handler(event, context):
 
     if request['query'] == 'projects':
         result = get_projects()
+
     elif request['query'] == 'usage':
-        result = get_usage(request)
+        result = get_usage(request, claims)
 
     return {
         "statusCode": 200,
