@@ -9,7 +9,7 @@ help: helper
 build: build_package_tmp
 
 helper:
-	echo "upgrade, build"
+	echo "update, build"
 
 build_package_tmp:
 	pyinstaller --onefile psutil.py
@@ -19,7 +19,7 @@ build_package_tmp:
 # 	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv $(VIRTUAL_ENV); fi
 # 	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
 
-upgrade:
+update:
 	pip3 install --upgrade amplio
 
 

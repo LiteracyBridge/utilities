@@ -4,15 +4,13 @@ traditionalIFS="$IFS"
 set -u
 
 # Script to create and initially populate the recipients table.
-# Extracts from UNICEF-2-recipients.csv (from UNICEF2 project spec), and scans ACM directories for "communities"
-# Creates and populates recipients.
 
 if [ -z "${psql:-}" ]; then
     if [ -e /Applications/Postgres.app/Contents/Versions/9.5/bin/psql ]; then
         psql=/Applications/Postgres.app/Contents/Versions/9.5/bin/psql
     elif [ -e /Applications/Postgres.app/Contents/Versions/9.4/bin/psql ]; then
         psql=/Applications/Postgres.app/Contents/Versions/9.4/bin/psql
-    elif [ ! -z $(which psql) ]; then
+    elif [ ! -z "$(which psql)" ]; then
         psql=$(which psql)
     else
         echo "Can't find psql!"
@@ -21,14 +19,19 @@ if [ -z "${psql:-}" ]; then
 fi
 if [ -z "${dbcxn:-}" ]; then
     dbcxn=" --host=lb-device-usage.ccekjtcevhb7.us-west-2.rds.amazonaws.com --port 5432 --username=lb_data_uploader --dbname=dashboard "
+    # dbcxn="--host=localhost --port=5432 --username=lb_data_uploader --dbname=dashboard"
+
 fi
 
 function configure() {
     recipientsfile="recipients.csv"
     recipmapfile="recipients_map.csv"
+    deplspecfile="deployment_spec.csv"
+
     project="$(awk -F , 'NR==2{print $2}' recipients.csv)"
 
     echo $(date)>log.txt
+    echo "Program is ${project}">>log.txt
     verbose=true
     execute=true
 
@@ -51,12 +54,11 @@ function importTable() {
     ${psql} ${dbcxn} -a <<EndOfQuery >>log.txt
     \\timing
     \\set ECHO all
-    create temporary table temp_recip as select * from recipients where false;
+    CREATE TEMPORARY TABLE temp_recip AS SELECT * FROM recipients WHERE FALSE;
     \copy temp_recip from '${recipientsfile}' with delimiter ',' csv header;
-    insert into recipients select * from temp_recip
-        on conflict do nothing
-        ;
-    update recipients set communityname = t.communityname,
+    INSERT INTO recipients SELECT * FROM temp_recip
+        ON CONFLICT DO NOTHING;
+    UPDATE recipients SET communityname = t.communityname,
                           groupname = t.groupname,
                           affiliate = t.affiliate,
                           component = t.component,
@@ -72,18 +74,39 @@ function importTable() {
                           agent = t.agent,
                           latitude = t.latitude,
                           longitude = t.longitude
-            from temp_recip t
-            where recipients.recipientid = t.recipientid;
+            FROM temp_recip t
+            WHERE recipients.recipientid = t.recipientid;
 
-    select * from recipients where project='${project}';
+    SELECT * FROM recipients WHERE project='${project}';
 
-    create temporary table temp_recip_map as select * from recipients_map where false;
+    CREATE TEMPORARY TABLE temp_recip_map AS SELECT * FROM recipients_map WHERE FALSE;
     \copy temp_recip_map from '${recipmapfile}' with delimiter ',' csv header;
-    insert into recipients_map select * from temp_recip_map  
-        on conflict do nothing
-        ;
+    INSERT INTO recipients_map SELECT * FROM temp_recip_map  
+        ON CONFLICT DO NOTHING;
 
-    select * from recipients_map where project='${project}';
+    SELECT * FROM recipients_map WHERE project='${project}';
+
+    CREATE TEMPORARY TABLE temp_deployments (
+        project CHARACTER VARYING,
+        deployment_num INTEGER,
+        startdate DATE,
+        enddate DATE,
+        component CHARACTER VARYING,
+        name CHARACTER VARYING
+        );
+    \copy temp_deployments from '${deplspecfile}' with delimiter ',' csv header;
+    UPDATE temp_deployments SET component='' WHERE component IS NULL;
+    INSERT INTO deployments
+        SELECT project, name, name, deployment_num, startdate, enddate, '', '', component
+        FROM temp_deployments
+        ON CONFLICT DO NOTHING;
+    UPDATE deployments SET startdate = d.startdate,
+                           enddate = d.enddate,
+                           component = d.component
+            FROM temp_deployments d
+            WHERE deployments.project = '${project}' AND deployments.deploymentnumber = d.deployment_num;
+
+    SELECT * FROM deployments WHERE project = '${project}' ORDER BY deploymentnumber;
 
 EndOfQuery
 }

@@ -43,7 +43,7 @@ class FileExporter(Exporter):
         talkingbook_map = Path(self._outdir, 'talkingbook_map.csv')
         if self.have_talkingbook_map_data():
             with talkingbook_map.open(mode='w', newline='\n') as tbmap:
-                srn_data = self.get_talkingbook_map_csv(tbmap)
+                self.get_talkingbook_map_data(tbmap)
 
     def write_deployment_spec_csv_file(self):
         deployment_spec_file = Path(self._outdir, 'deployment_spec.csv')
