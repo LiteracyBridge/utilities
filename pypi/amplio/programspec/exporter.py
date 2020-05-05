@@ -1,13 +1,12 @@
 import csv
 import json
 from io import StringIO
-from pathlib import Path
 
 from . import programspec
 from .recipient_utils import RecipientUtils
 
 
-class Exporter():
+class Exporter:
     def __init__(self, spec: programspec):
         self._spec = spec
 
@@ -18,7 +17,6 @@ class Exporter():
         """
         Writes a talkingbook_map from the given program spec. A program spec has a talkingbook_map only
         if the recipients have a talkingbook column.
-        :param self._spec: A programspec that may have talkingbook ids.
         :param csvfile: The file-like object to which the csv data is written.
         :return: Nothing.
         """
@@ -36,7 +34,14 @@ class Exporter():
                     community = recipient.directory_name.upper()
                     line = [recipient.talkingbookid, recipient.recipientid, community.upper(), project]
                     print(','.join(line), file=csvfile)
-        return heading # proxy for 'wrote something'
+        return heading  # proxy for 'wrote something'
+
+    def have_talkingbook_map_data(self):
+        for component in self._spec.components.values():
+            for recipient in component.recipients:
+                if recipient.recipientid and recipient.directory_name and recipient.talkingbookid:
+                    return True
+        return False
 
     def get_talkingbook_map_csv(self):
         csv_data = StringIO()
@@ -170,7 +175,8 @@ class Exporter():
         """
         csvwriter = csv.writer(csvfile, delimiter=',')
         csvwriter.writerow(
-            ['deployment_num', 'playlist_title', 'message_title', 'key_points', 'languagecode', 'variant', 'default_category',
+            ['deployment_num', 'playlist_title', 'message_title', 'key_points', 'languagecode', 'variant',
+             'default_category',
              'sdg_goals', 'sdg_targets'])
 
         for no in sorted(self._spec.deployment_numbers):
@@ -193,5 +199,3 @@ class Exporter():
     def get_content_json(self):
         content = self._spec.content
         return json.dumps(content)
-
-

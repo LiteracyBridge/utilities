@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Any, Dict, Tuple, Union
 
 from amplio.rolemanager import Roles
 from amplio.rolemanager.rolesdb import *
@@ -270,7 +270,13 @@ def get_admin_objects_for_user(email: str):
     return result_orgs, result_progs, orphan_programs
 
 
-def is_email_known(email):
+def is_email_known(email)-> Tuple[bool, bool]:
+    """
+    Determine if a given email is "known", that is, has any role been assigned to that
+    email address, for any program or organization. Returns two booleans; the first
+    is True if the email address is known, and the second is true if it is known only
+    by the domain (ie, nobody@amplio.org is known by @amplio.org)
+    """
     email_split = email.split('@')
     email_domain = '@' + email_split[1] if len(email_split) == 2 and len(email_split[0]) > 0 else None
 
@@ -285,7 +291,7 @@ def is_email_known(email):
     return False, False
 
 
-def get_programs_for_user(email: str):
+def get_programs_for_user(email: str) -> Dict[str, str]:
     programs = {}
     email_split = email.split('@')
     email_domain = '@' + email_split[1] if len(email_split) == 2 and len(email_split[0]) > 0 else None
