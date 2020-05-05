@@ -41,6 +41,9 @@ remove_unused:
 	rm -rf ./package/tmp/s3transfer*
 	rm -rf ./package/tmp/.gitignore
 	rm -rf ./package/tmp/.idea
+	rm -rf ./package/tmp/pkg_resources*
+	find ./package/tmp -iname __pycache__ -type d -exec rm -rf {} +
+	rm -rf ./package/tmp/amplio-*.egg-info
 
 	rm -rf ./package/tmp/jdcal*
 	rm -rf ./package/tmp/openpyxl*

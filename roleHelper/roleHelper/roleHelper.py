@@ -63,24 +63,24 @@ def lambda_handler(event, context):
     result = {'output': [],
               'status': ''}
 
-    print('Event path parameters: {}'.format(event.get('pathParameters')))
+    # print('Event path parameters: {}'.format(event.get('pathParameters')))
     parts = [x for x in event.get('pathParameters', {}).get('proxy', 'reserve').split('/') if x != 'data']
     action = parts[0].lower()
     body = event.get('body')
     print(str(body))
     try:
         data = json.loads(body)
-        print('body length {}, data: {}'.format(len(body), body))
+        # print('body length {}, data: {}'.format(len(body), body))
     except Exception as ex:
         data = ''
-        print('exception getting body length')
+        # print('exception getting body length')
 
     print('Action: {}'.format(action))
 
     path = event.get('path', {})
     path_parameters = event.get('pathParameters', {})
     query_string_params = event.get('queryStringParameters', {})
-    print('Query string parameters: {}'.format(query_string_params))
+    # print('Query string parameters: {}'.format(query_string_params))
 
     claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
 
@@ -99,7 +99,7 @@ def lambda_handler(event, context):
         result['status'] = STATUS_FAILURE
         result['exception'] = 'Exception: {}'.format(ex)
 
-    print('Result: {}'.format(result))
+    print('Action: {}, claims: {}, data: {}, result: {}'.format(action, claims, data, result))
     end = time.time_ns()
 
     return {
