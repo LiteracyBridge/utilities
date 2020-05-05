@@ -252,6 +252,7 @@ def get_usage(request, claims):
 
     # Create a convenience view limited to the data of interest.
     if usage_params['deployment']:
+        print('Program filter: "{}" with: {}, {}'.format(view_query_depl, program, usage_params['deployment']))
         cur.execute(view_query_depl, (program, usage_params['deployment']))
     else:
         cur.execute(view_query, (program,))
@@ -259,6 +260,8 @@ def get_usage(request, claims):
     # Run the query
     num_rows = 0
     file_like = io.StringIO()
+
+    print('Main query: "{}"'.format(usage_params['query']))
     cur.execute(usage_params['query'])
     num_columns = len(cur.description)
     writer = csv.writer(file_like, quoting=csv.QUOTE_MINIMAL)
