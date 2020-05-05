@@ -38,7 +38,7 @@ copy_python:
 
 remove_unused:
 	rm -rf ./package/tmp/wheel*
-	rm -rf ./package/tmp/easy-install*
+	rm -rf ./package/tmp/easy_install*
 	rm -rf ./package/tmp/setuptools*
 	rm -rf ./package/tmp/pip*
 	rm -rf ./package/tmp/botocore*
