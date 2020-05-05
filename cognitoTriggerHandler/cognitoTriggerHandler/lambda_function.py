@@ -1,4 +1,7 @@
+import hashlib
+
 import boto3
+from amplio.rolemanager import manager
 
 REGION_NAME = 'us-west-2'
 
@@ -8,6 +11,7 @@ table = dynamodb.Table(TABLE_NAME)
 USER_POOL_ID = 'us-west-2_6EKGzq75p'
 cognito_client = boto3.client('cognito-idp')
 
+manager.open_tables()
 
 def _email_from_event(event: dict) -> str:
     """
@@ -46,15 +50,26 @@ def get_user_access(email):
         if not user_info:
             user_info = {'edit': '', 'view': '', 'admin': False}
 
+    # program:roles;program:roles...
+    programs = ';'.join([p+':'+r for p,r in manager.get_programs_for_user(email).items()])
+    try:
+        md5 = hashlib.md5()
+        md5.update(email.lower().encode('utf-8'))
+        hash = md5.hexdigest()
+    except:
+        hash=None
     user_access = {'edit': user_info.get('edit', ''),
                    'view': user_info.get('view', ''),
-                   'admin': user_info.get('admin', False)
+                   'admin': user_info.get('admin', False),
+                   'programs': programs
                    }
+    if hash:
+        user_access['hash'] = hash
     print('Access for user {}: {}'.format(email, user_access))
     return user_access
 
 
-def is_email_confirmed(email: str) -> tuple:
+def was_email_already_confirmed_to_user(email: str) -> tuple:
     """
     Look up an email address to see if it belongs to a confirmed user. If so, also return
     the username.
@@ -77,14 +92,19 @@ def pre_signup_handler(event):
     """
     email = _email_from_event(event)
 
-    confirmed, user = is_email_confirmed(email)
+    # Is the email address *already* confirmed to a user?
+    confirmed, user = was_email_already_confirmed_to_user(email)
     if confirmed:
+        print("pre-signup event for existing user '{}' with (new) email '{}'. Event: '{}'".format(user, email, event))
         raise Exception("That email address is in use by user '{}'.".format(user))
 
     # The email address isn't yet claimed. Validate the email address should have access.
-    access = get_user_access(email)
-    if not access['edit'] and not access['view']:
+    is_known, by_domain = manager.is_email_known(email)
+    if not is_known:
+        print("pre-signup event for unrecognized email '{}'. Event: '{}'".format(email, event))
         raise Exception("'{}' is not authorized".format(email))
+
+    print("pre-signup event success for email '{}'. Event: '{}'".format(email, event))
 
 
 def token_generation_handler(event):
@@ -119,8 +139,8 @@ if __name__ == '__main__':
         result = None
         try:
             result = lambda_handler(event, None)
-        except:
-            pass
+        except Exception as ex:
+            result = {'exception': str(ex)}
         return result
 
 
@@ -133,16 +153,19 @@ if __name__ == '__main__':
 
         # Should not be able to sign up existing user
         result = simulate('PreSignUp_SignUp', 'demo@literacybridge.org')
+        print(result)
         rc = 0 if not result else 1
         rc_list.append(rc)
 
         # Should be able to sign up new user at known domain
         result = simulate('PreSignUp_SignUp', 'NaNaHeyHeyGoodBy@amplio.org')
+        print(result)
         rc = 0 if result else 1
         rc_list.append(rc)
 
         # Should not be able to sign up random user at random domain.
         result = simulate('PreSignUp_SignUp', 'me@example.com')
+        print(result)
         rc = 0 if not result else 1
         rc_list.append(rc)
 
