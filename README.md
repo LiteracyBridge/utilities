@@ -10,6 +10,7 @@ A collection of:
 Stand Alone Tools
 =================
 |Name|Description|
+|----|-----------|
 |README.md|This file|
 |logfileS3Consolidator||
 |psutil|A stand-alone program spec utility application. Validates program specs. Reconciles spec with directory (mostly for legacy).|
@@ -20,6 +21,7 @@ Stand Alone Tools
 Lambda Functions
 ================
 |Directory|Lambda|API Gateway|Description|
+|---------|------|-----------|-----------|
 |acmCheckOut|acmCheckOut|CheckOut|Used by the ACM to check out the database for a program.|
 |listAcmCheckouts|listAcmCheckouts|CheckOut|Provides a list of checkouts to the dashboard.|
 |psHelper|programSpecification|programSpecification|AWS Lambda function to manage server side of program spec. Upload, download, approve.|
@@ -33,6 +35,7 @@ Shared Python Code
 In the pypi/amplio directory.
 
 |Name|Description|
+|----|-----------|
 |programspec|Read a program specification spreadsheet, validate, export to .csv data.|
 |rolemanager|Query and update 'organizations' and 'programs' tables in DyanmoDB. Manages roles for users and organizations.|
 
