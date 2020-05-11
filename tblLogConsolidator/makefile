@@ -1,10 +1,10 @@
-PROJECT = logfileS3Consolidator
-PYTHON = python3.7
-VIRTUAL_ENV = .logfiles3env
-FUNCTION_NAME = logfileS3Consolidator
-FUNCTION_HANDLER = logfileS3Consolidator.lambda_handler
+PROJECT = tblLogConsolidator
+PYTHON = python3.8
+VIRTUAL_ENV = tblLogEnv
+FUNCTION_NAME = tblLogConsolidator
+FUNCTION_HANDLER = tblLogConsolidator.lambda_handler
 FUNCTION_ROLE = arn:aws:iam::856701711513:role/lambda-checkout
-FUNCTION_DESCRIPTION = Consolidate multiple log files into one daily log file.
+FUNCTION_DESCRIPTION = Consolidate multiple TB-Loader log files into one daily log file.
 AWS_REGION = us-west-2
 
 # Default commands
@@ -25,7 +25,7 @@ clean_package:
 
 build_package_tmp:
 	mkdir -p ./package/tmp
-	cp -a ./$(PROJECT)/. ./package/tmp/
+	cp -a ./$(PROJECT)/*.py ./package/tmp/
 
 copy_python:
 # 	if test -d $(VIRTUAL_ENV)/lib; then cp -a $(VIRTUAL_ENV)/lib/$(PYTHON)/site-packages/. ./package/tmp/; fi
