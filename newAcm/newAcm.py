@@ -14,6 +14,9 @@ import dropbox
 import pg8000
 from botocore.exceptions import ClientError
 
+import amplio.rolemanager.manager as roles_manager
+from amplio.rolemanager.Roles import *
+
 REGION_NAME = 'us-west-2'
 
 # specify dynamoDB table for checkout records
@@ -556,19 +559,27 @@ def create_checkout_record(acm_name):
     return True
 
 
-def create_program_record(program_name, organization):
+def create_program_record(program_name, organization, admin_email):
     print('Creating program record for {} in organization {}'.format(program_name, organization), end='')
     update_expr = 'SET organization = :o'
     expr_values = {
         ':o': organization
     }
+    item = {'program': program_name, 'organization': organization}
+    if admin_email:
+        item['roles'] = {admin_email: ADMIN_ROLES}
+        update_expr += ', :rn = :r'
+        expr_values[':rn'] = 'roles'
+        expr_values[':r'] = 'M: {:e : ' + ADMIN_ROLES + ' }'
+        expr_values[':e'] = admin_email
 
     try:
-        program_table.update_item(
-            Key={'program': program_name},
-            UpdateExpression=update_expr,
-            ExpressionAttributeValues=expr_values
-        )
+        program_table.put_item(Item=item)
+        # program_table.update_item(
+        #     Key={'program': program_name},
+        #     UpdateExpression=update_expr,
+        #     ExpressionAttributeValues=expr_values
+        # )
     except Exception as err:
         print('exception creating record: {}'.format(err))
         return False
@@ -669,6 +680,7 @@ def populate_project_list(acm_name):
     return True
 
 
+# noinspection PyUnresolvedReferences
 def new_acm():
     global args
     ok = True
@@ -701,7 +713,7 @@ def new_acm():
         if args.do_checkout == 'both':
             ok = create_checkout_record(acm_name) and ok
         if args.do_program == 'both':
-            ok = create_program_record(acm_name, args.organization)
+            ok = create_program_record(acm_name, args.organization, args.admin)
         if args.do_organization == 'both':
             ok = create_organization_record(args.organization, args.parent_organization)
         if args.do_progspec == 'both':
@@ -734,6 +746,7 @@ def main():
     arg_parser.add_argument('--parent-organization', '--parent_org', '--parent',
                             help='The program\'s organization\'s parent.',
                             default='Amplio')
+    arg_parser.add_argument('--admin', help='Email address of the program administrator.')
     arg_parser.add_argument('--dry-run', '-n', action='store_true', help='Don\'t update anything.')
 
     arg_parser.add_argument('--do-acm', choices=['none', 'check', 'both'], default='both',
