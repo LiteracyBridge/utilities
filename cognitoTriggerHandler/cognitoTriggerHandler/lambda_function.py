@@ -69,13 +69,14 @@ def get_user_access(email):
     return user_access
 
 
-def was_email_already_confirmed_to_user(email: str) -> tuple:
+# noinspection PyPep8Naming
+def was_email_already_confirmed_to_user(email: str, UserPoolId: str = USER_POOL_ID) -> tuple:
     """
     Look up an email address to see if it belongs to a confirmed user. If so, also return
     the username.
     """
     response = cognito_client.list_users(
-        UserPoolId=USER_POOL_ID,
+        UserPoolId=UserPoolId,
         AttributesToGet=[],
         Limit=0,
         Filter='email = "' + email + '"'
@@ -91,11 +92,17 @@ def pre_signup_handler(event):
     Validates that a user is not already signed up, and is allowed to sign up.
     """
     email = _email_from_event(event)
+    user_pool = event.get('userPoolId', USER_POOL_ID)
+    print(f"Pre-signup handler checking validity for email address '{email}'.")
 
     # Is the email address *already* confirmed to a user?
-    confirmed, user = was_email_already_confirmed_to_user(email)
+    confirmed, user = was_email_already_confirmed_to_user(email, UserPoolId=user_pool)
     if confirmed:
-        print("pre-signup event for existing user '{}' with (new) email '{}'. Event: '{}'".format(user, email, event))
+        print("pre-signup event for existing user '{}' with (new) email '{}'. User pool '{}'. Event: '{}'"
+              .format(user,
+                      email,
+                      user_pool,
+                      event))
         raise Exception("That email address is in use by user '{}'.".format(user))
 
     # The email address isn't yet claimed. Validate the email address should have access.

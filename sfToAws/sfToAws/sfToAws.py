@@ -42,7 +42,7 @@ BAD_CHARS_RE = re.compile('[<>:"/\\\\|?*\x01-\x1f]')
 
 class SfToAws:
     def __init__(self, **kwargs):
-
+        """Initialize the instance, open the database, ensure the tables exist."""
         self._dynamodb_client = boto3.client('dynamodb')  # specify amazon service to be used
         self._dynamodb_resource = boto3.resource('dynamodb')
 
@@ -224,8 +224,14 @@ def lambda_handler(event, context):
                 email_text.append('{}:"{}"'.format(k, v))
 
             net_data = sf_db.get_record(sf_data)
-            if all([x in net_data for x in ['customer','affiliate','tech_poc','acm']]):
-                email_text.append('newAcm --org "{customer}" --parent "{affiliate}" --admin {tech_poc} "{acm}"'.format(**net_data))
+            if all([x in net_data for x in ['customer', 'affiliate', 'tech_poc', 'acm']]):
+                email_text.append(
+                    'newAcm --org "{customer}" --parent "{affiliate}" --admin {tech_poc} "{acm}"'.format(**net_data))
+        else:
+            email_text.append('Full record:')
+            for k, v in sf_data.items():
+                email_text.append('{}:"{}"'.format(k, v))
+            email_text.append(' ')
 
     send_ses(subject='New program records', body='\n'.join(email_text))
 

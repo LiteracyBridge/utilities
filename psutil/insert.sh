@@ -52,28 +52,69 @@ function main() {
 function importTable() {
     # Import into db, and update recipients
     ${psql} ${dbcxn} -a <<EndOfQuery >>log.txt
+    BEGIN TRANSACTION;
     \\timing
     \\set ECHO all
-    CREATE TEMPORARY TABLE temp_recip AS SELECT * FROM recipients WHERE FALSE;
+    -- Create a table matching the .csv file
+    CREATE TEMPORARY TABLE temp_recip (
+        recipientid char varying,
+        project char varying,
+        partner char varying,
+        communityname char varying,
+        groupname char varying,
+        affiliate char varying,
+        component char varying,
+        country char varying,
+        region char varying,
+        district char varying,
+        numhouseholds integer,
+        numtbs integer,
+        supportentity char varying,
+        model char varying,
+        language char varying,
+        coordinates point,
+        agent char varying,
+        latitude double precision,
+        longitude double precision,
+        variant char varying
+    );
     \copy temp_recip from '${recipientsfile}' with delimiter ',' csv header;
+    
+    -- Add the required group_size column
+    ALTER TABLE temp_recip ADD COLUMN group_size INTEGER;
+    UPDATE temp_recip SET group_size = 0;
+
+    -- Copy from temp_recip into recipients
     INSERT INTO recipients SELECT * FROM temp_recip
+        --ON CONFLICT ON CONSTRAINT recipients_uniqueness_key
+        --DO UPDATE
+        --    SET partner=EXCLUDED.partner,
+        --        project=EXCLUDED.project,
+        --        communityname=EXCLUDED.communityname,
+        --        groupname=EXCLUDED.groupname,
+        --        agent=EXCLUDED.agent
         ON CONFLICT DO NOTHING;
-    UPDATE recipients SET communityname = t.communityname,
-                          groupname = t.groupname,
-                          affiliate = t.affiliate,
-                          component = t.component,
-                          country = t.country,
-                          region = t.region,
-                          district = t.district,
-                          numhouseholds = t.numhouseholds,
-                          numtbs = t.numtbs,
-                          supportentity = t.supportentity,
-                          model = t.model,
-                          language = t.language,
-                          coordinates = t.coordinates,
-                          agent = t.agent,
-                          latitude = t.latitude,
-                          longitude = t.longitude
+                        
+    UPDATE recipients SET project=t.project,
+                            partner=t.partner,
+                            communityname=t.communityname,
+                            groupname=t.groupname,
+                            affiliate=t.affiliate,
+                            component=t.component,
+                            country=t.country,
+                            region=t.region,
+                            district=t.district,
+                            numhouseholds=t.numhouseholds,
+                            numtbs=t.numtbs,
+                            supportentity=t.supportentity,
+                            model=t.model,
+                            language=t.language,
+                            coordinates=t.coordinates,
+                            agent=t.agent,
+                            latitude=t.latitude,
+                            longitude=t.longitude,
+                            variant=t.variant,
+                            group_size=t.group_size
             FROM temp_recip t
             WHERE recipients.recipientid = t.recipientid;
 
@@ -108,6 +149,7 @@ function importTable() {
 
     SELECT * FROM deployments WHERE project = '${project}' ORDER BY deploymentnumber;
 
+    COMMIT TRANSACTION;
 EndOfQuery
 }
 
