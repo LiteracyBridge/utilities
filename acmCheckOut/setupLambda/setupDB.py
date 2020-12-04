@@ -3,8 +3,9 @@ setupDB.py
 A script that sets up an AWS dynamoDB table for the ACM checkout procedure.
 Can be run from terminal with optional argument:    -t, --tablename    desired dynamoDB table name
 """
-import boto3
 import argparse
+
+import boto3
 
 
 def create_DB(table_name='test_acm_check_out'):
@@ -18,20 +19,20 @@ def create_DB(table_name='test_acm_check_out'):
     :return: None
     """
     try:
-        client = boto3.client('dynamodb')    # specify amazon service to be used
+        client = boto3.client('dynamodb')  # specify amazon service to be used
         table = client.create_table(
-            AttributeDefinitions=[    # specify attribute names & types required for table's key schema
+            AttributeDefinitions=[  # specify attribute names & types required for table's key schema
                 {
-                    'AttributeName': 'acm_name',    # primary partition key
-                    'AttributeType': 'S'    # S = string
+                    'AttributeName': 'acm_name',  # primary partition key
+                    'AttributeType': 'S'  # S = string
                 },
                 {
-                    'AttributeName': 'transaction',    # primary sort key
+                    'AttributeName': 'transaction',  # primary sort key
                     'AttributeType': 'S'
                 },
             ],
             TableName=table_name,
-            KeySchema=[    # specify primary partition and primary sort keys
+            KeySchema=[  # specify primary partition and primary sort keys
                 {
                     'AttributeName': 'acm_name',
                     'KeyType': 'HASH'  # HASH = partition key
@@ -41,17 +42,18 @@ def create_DB(table_name='test_acm_check_out'):
                     'KeyType': 'RANGE'  # RANGE = sort key
                 },
             ],
-            ProvisionedThroughput={    # limit read/write capacity units of table (affects cost of table)
+            ProvisionedThroughput={  # limit read/write capacity units of table (affects cost of table)
                 'ReadCapacityUnits': 1,
                 'WriteCapacityUnits': 1
             }
         )
-        print 'Successfully created table: ', table['TableDescription']
+        print('Successfully created table: ' + table['TableDescription'])
     except Exception as err:
-        print 'ERROR: ', err
+        print(f'ERROR: {err}')
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--tablename', help='Desired dynamoDB table name', default = "test_acm_check_out")
+    parser.add_argument('-t', '--tablename', help='Desired dynamoDB table name', default="test_acm_check_out")
     args = parser.parse_args()
     create_DB(args.tablename)
