@@ -1,5 +1,5 @@
 PROJECT = checkout
-PYTHON = python3.7
+PYTHON = python3.8
 VIRTUAL_ENV = .acmCheckOutEnv
 FUNCTION_NAME = arn:aws:lambda:us-west-2:856701711513:function:acmCheckOut
 FUNCTION_HANDLER = checkout.lambda_handler
@@ -22,6 +22,9 @@ virtual:
 	fi
 	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
 
+upgrade:
+	pip3 install --upgrade amplio
+
 clean_package:
 	rm -rf ./package/* 
 
@@ -30,12 +33,12 @@ build_package_tmp:
 	cp -a ./$(PROJECT)/. ./package/tmp/
 
 copy_python:
-# 	if test -d $(VIRTUAL_ENV)/lib; then \
-# 	    cp -a $(VIRTUAL_ENV)/lib/$(PYTHON)/site-packages/. ./package/tmp/; \
-# 	fi	
-# 	if test -d $(VIRTUAL_ENV)/lib64; then \
-# 	    cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; \
-# 	fi
+	if test -d $(VIRTUAL_ENV)/lib; then \
+	    cp -a $(VIRTUAL_ENV)/lib/$(PYTHON)/site-packages/. ./package/tmp/; \
+	fi
+	if test -d $(VIRTUAL_ENV)/lib64; then \
+	    cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; \
+	fi
 
 remove_unused:
 	rm -rf ./package/tmp/wheel*
@@ -43,6 +46,26 @@ remove_unused:
 	rm -rf ./package/tmp/setuptools*
 	rm -rf ./package/tmp/pip*
 	rm -rf ./package/tmp/.gitignore
+	rm -rf ./package/tmp/botocore*
+	rm -rf ./package/tmp/boto3*
+	rm -rf ./package/tmp/s3transfer*
+	rm -rf ./package/tmp/easy_install.py
+	rm -rf ./package/tmp/__pycache__
+
+	rm -rf ./package/tmp/amplio-*
+	rm -rf ./package/tmp/amplio/programspec
+	rm -rf ./package/tmp/amplio/rolemanager/_pycache__
+
+	rm -rf ./package/tmp/pkg_resources
+
+	rm -rf ./package/tmp/dateutil/*
+	rm -rf ./package/tmp/et_xmlfile*
+	rm -rf ./package/tmp/jdcal*
+	rm -rf ./package/tmp/jmespath*
+	rm -rf ./package/tmp/openpyxl*
+	rm -rf ./package/tmp/python_dateutil*
+	rm -rf ./package/tmp/six*
+	rm -rf ./package/tmp/urllib3*
 
 zip:
 	cd ./package/tmp && zip -r ../$(PROJECT).zip .

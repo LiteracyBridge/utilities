@@ -36,7 +36,12 @@ acm_check_out = {
 
 """
 import datetime
+import json
+import logging
 from random import randint
+
+from amplio.rolemanager import manager as roles_manager
+from amplio.rolemanager.Roles import *
 
 import boto3
 
@@ -45,6 +50,11 @@ BUCKET_NAME = 'acm-logging'
 TABLE_NAME = 'acm_check_out'
 CHECKED_IN = 'CHECKED_IN'
 CHECKED_OUT = 'CHECKED_OUT'
+
+STATUS = 'status'
+STATUS_OK = 'ok'
+STATUS_DENIED = 'denied'
+STATUS_FAILURE = 'failure'
 
 # fields that we won't return.
 EXCLUDED_FIELDS = ['now_out_key']
@@ -56,6 +66,44 @@ bucket = s3.Bucket(BUCKET_NAME)
 # specify dynamoDB table
 dynamodb = boto3.resource('dynamodb', region_name=REGION_NAME)
 table = dynamodb.Table(TABLE_NAME)
+
+roles_manager.open_tables()
+
+
+class Authorizer:
+    roles_for_action = {
+        'statuscheck': ['*', 'AD', 'PM', 'CO'],
+        'checkout': ['*', 'AD', 'PM', 'CO'],
+        'checkin': ['*', 'AD', 'PM', 'CO'],
+        'discard': ['*', 'AD', 'PM', 'CO'],
+        'revokecheckout': ['*' 'AD', 'PM'],
+        'create': ['*', 'AD'],
+        'reset': ['*', 'AD'],
+        'list': ['*', 'AD', 'PM', 'CO']
+    }
+
+    # noinspection PyUnusedLocal
+    @staticmethod
+    def is_authorized(claims, action, program: str = None):
+        email = claims.get('email')
+        has_roles = roles_manager.get_roles_for_user_in_program(email, program)
+        needs_roles = Authorizer.roles_for_action.get(action, ['!!'])
+        ok = any(role in has_roles for role in needs_roles)
+        print('Roles for {} in {}: has {}, needs {}, authorized: {}'.format(email, program, has_roles, needs_roles, ok))
+        return ok
+
+
+authorizer: Authorizer = Authorizer()
+
+
+# Given a program or ACM name, return just the program name part, uppercased. ACM-TEST -> TEST, test -> TEST
+def cannonical_program_name(acm_name):
+    if acm_name is None:
+        return None
+    acm_name = acm_name.upper()
+    if acm_name.startswith('ACM-'):
+        acm_name = acm_name[4:]
+    return acm_name
 
 
 def now():
@@ -69,26 +117,75 @@ def lambda_handler(event, context):
     :param context: object -- can be used to get runtime data (unused but required by AWS lambda)
     :return: a JSON string object that contains the status of transaction & information required by java program
     """
-    print(event)
     try:
-        # parameters received from HTTPS POST request:
-        api_version = event.get('api')
-        if not api_version:
-            return v0_handler(event)
-        elif api_version == '1':
-            return V1Handler(event).handle_event()
+        kwargs = {}
+        qp = event.get('queryStringParameters')
+        if qp:
+            kwargs['queryStringParameters'] = qp
+        qp = event.get('pathParameters')
+        if qp:
+            kwargs['pathParameters'] = qp
+        qp = event.get('requestContext', {}).get('authorizer', {}).get('claims')
+        if qp:
+            kwargs['claims'] = qp
+        try:
+            qp = None
+            event_body = event.get('body')
+            if event_body and isinstance(event_body, str):
+                qp = json.loads(event_body)
+            else:
+                qp = event_body
+        except Exception:
+            pass
+        if qp:
+            kwargs['body'] = qp
+        # The stage variables might be useful at some point
+        # qp = event.get('stageVariables')
+        # if qp:
+        #     kwargs['stageVariables'] = qp
+
+        if len(kwargs.keys()) > 0:
+            print(f'Lambda integration {kwargs}')
+            try:
+                body = V1Handler(event, **kwargs).handle_event()
+                print('return statusCode: 200')
+                return {
+                    'statusCode': 200,
+                    "headers": {"Access-Control-Allow-Origin": "*"},
+                    'body': json.dumps(body)
+                }
+            except Exception as e:
+                logger = logging.getLogger()
+                logger.setLevel(logging.DEBUG)
+                logger.error(str(e), exc_info=True)
+                return {
+                    'data': STATUS_DENIED,
+                    STATUS: STATUS_DENIED,
+                    'response': 'Exception processing request'
+                }
+        else:
+            send_ses('techsupport@amplio.org', 'v0 call to acmCheckOut', json.dumps(event), ['bill@amplio.org'])
+            print('No apparent cognito info')
+            print(event)
+
+            # parameters received from HTTPS POST request:
+            api_version = event.get('api')
+            if not api_version:
+                return v0_handler(event)
+            elif api_version == '1':
+                return V1Handler(event).handle_event()
 
         return {
-            'data': 'denied',
-            'status': 'denied',
+            'data': STATUS_DENIED,
+            STATUS: STATUS_DENIED,
             'response': 'Unknown api version'
         }
 
     except Exception as err:
         return {
             'response': 'Unexpected Error',
-            'data': 'denied',
-            'status': 'denied',
+            'data': STATUS_DENIED,
+            STATUS: STATUS_DENIED,
             'error': str(err)
         }
 
@@ -98,25 +195,68 @@ def extract_state(acm):
 
 
 class V1Handler:
-    def __init__(self, event):
+    def __init__(self, event, **kwargs):
         self.event = event
-        self.acm_record = None
+        self._checkout_record = None
+        # The event may contain several of these:
+        # action (required)
+        # db (required, the program)
+        # name (user's name)
+        # contact (user's phone or email)
+        # version (version of the ACM making the request)
+        # computername (name of the computer where the ACM is running)
+        # key (random number, assigned at checkout, must match to checkin)
+        # filename (the name of the file being checked in -- the latest db123.zip file)
+
+        path_parameters = kwargs.get('pathParameters', {})
+        query_string_parameters = kwargs.get('queryStringParameters', {})
+        claims = kwargs.get('claims', {})
+        # stage_variables = kwargs.get('stageVariables')
+
+        self._body = kwargs.get('body', {})
+        self._claims = claims
+        self._email = claims.get('email')
+        # self._stage_variables = stage_variables
+
+        if path_parameters:
+            path_parts = path_parameters.get('proxy', '').split('/')
+            self._action = path_parts[0].lower()
+            self._program = path_parts[1] if len(path_parts) > 1 else None
+            print(f'path parameters: {self._action}, {self._program}')
+        else:
+            self._action = (query_string_parameters.get('action') or event.get('action', '')).lower()
+            self._program = event.get('db') or event.get('program')
+
+        self._name = query_string_parameters.get('name') or self._claims.get('email') or event.get('name')
+        self._contact = query_string_parameters.get('phone_number') or event.get('contact')
+        self._version = query_string_parameters.get('version') or event.get('version')
+        self._computername = query_string_parameters.get('computername') or event.get('computername')
+        self._key = query_string_parameters.get('key') or event.get('key')
+        self._filename = query_string_parameters.get('filename')
+        self._comment = query_string_parameters.get('comment') or event.get('comment')
+
+        print(f'Arguments: action:{self._action}, program:{self._program}, name:{self._name}, contact:{self._contact}')
 
     def handle_event(self):
-        # Every action has a db associated with it. Get the db record from dynamo.
+        action = self._action.lower()
+        if action == 'list':
+            return self.list_checkouts()
+        elif action == 'report':
+            return self.report()
+
+        # Every action after this has a db associated with it. Get the db record from dynamo.
         self.query_db()
-        action = self.event.get('action').lower()
 
         # dispatch on the action
-        if action == 'dbcheck':
-            return self.db_check()
+        if action=='statuscheck':
+            return self.statuscheck()
         elif action == 'checkout':
             return self.checkout()
         elif action == 'checkin':
             return self.checkin()
-        elif action == 'abandon':
-            return self.abandon()
-        elif action == 'revoke':
+        elif action == 'discard':
+            return self.discard()
+        elif action == 'revokecheckout':
             return self.revoke()
         elif action == 'create':
             return self.create()
@@ -124,13 +264,14 @@ class V1Handler:
             return self.reset()
 
         return {
-            'status': 'denied',
+            STATUS: STATUS_DENIED,
             'response': 'Unknown action requested'
         }
 
     def update_db(self, update_expression, condition_expression, expression_values, condition_handler=None, **kwargs):
         try:
-            acm_name = self.event.get('db')  # db name
+            # acm_name = self._program  # db name
+            acm_name = self._program
 
             table.update_item(
                 Key={'acm_name': acm_name},
@@ -138,10 +279,10 @@ class V1Handler:
                 ConditionExpression=condition_expression,
                 ExpressionAttributeValues=expression_values
             )
-            logger(self.event, 'ok')
+            logger(self.event, STATUS_OK)
             # get current values for return
             self.query_db()
-            return self.make_return('ok', **kwargs)
+            return self.make_return(STATUS_OK, **kwargs)
         except Exception as err:
             # transaction intercepted: unexpected error or conditional check failed
             if 'ConditionalCheckFailedException' in str(err):
@@ -152,63 +293,90 @@ class V1Handler:
                     handled = condition_handler(err)
                     if handled is not None:
                         return handled
-                logger(self.event, 'denied')
-            return self.make_return('denied', error=str(err))
+                logger(self.event, STATUS_DENIED)
+            return self.make_return(STATUS_DENIED, error=str(err))
 
     def query_db(self):
-        db = self.event.get('db')
-        query_acm = table.get_item(Key={'acm_name': db})
-        self.acm_record = query_acm.get('Item')
+        # db = self._program
+        program = self._program
+        query_acm = table.get_item(Key={'acm_name': program})
+        self._checkout_record = query_acm.get('Item')
 
     def make_return(self, status, **kwargs):
-        retval = {'status': status,
-                  'state': {k: v for k, v in self.acm_record.items() if k not in EXCLUDED_FIELDS}
-                  }
+        retval = {STATUS: status, 'state': {}}
+        try:
+            if self._checkout_record:
+                retval['state'] = {k: v for k, v in self._checkout_record.items() if k not in EXCLUDED_FIELDS}
+        except Exception:
+            pass
+
         # Make sure that the returned db state includes at least the db name. Happens only if the db
         # doesn't exist.
         if 'acm_name' not in retval['state']:
-            retval['state'].set('acm_name', self.event.get('db'))
+            retval['state']['acm_name'] = self._program
         for k, v in kwargs.items():
             retval[k] = v
         return retval
 
     @property
-    def db_status(self):
-        if self.acm_record is None:
+    def db_state(self):
+        if self._checkout_record is None:
             return 'nodb'
-        status = 'checkedout' if self.acm_record.get('acm_state') == CHECKED_OUT else 'available'
+        status = 'checkedout' if self._checkout_record.get('acm_state') == CHECKED_OUT else 'available'
         return status
 
-    def db_check(self):
+    def statuscheck(self):
         """
         Determine if the db exists, and if it does, can it be checked out.
         :return: 'available' if db is available for checkout, 'checkedout' if alreay checked out, 'nodb' if no db.
         """
-        if self.acm_record is None:
+        if self._checkout_record is None:
             return self.make_return('nodb')
-        status = self.db_status
-        return self.make_return(status)
+        status = self.db_state
+        return self.make_return(STATUS_OK if status=='available' else status)
+
+    def list_checkouts(self):
+        def has_access(program: str):
+            if program in admin_targets:
+                return True
+            for uf in uf_targets:
+                if program.startswith(uf):
+                    return True
+            return False
+
+        email = self._claims.get('email')
+        programs = roles_manager.get_programs_for_user(email)
+        admin_targets = [k for k, v in programs.items() if SUPER_USER_ROLE in v or ADMIN_ROLE in v]
+        uf_targets = [x + '-FB-' for x in admin_targets]
+
+        acms = []
+        checkouts = table.scan()['Items']
+        for checkout in checkouts:
+            if has_access(cannonical_program_name(checkout.get('acm_name'))):
+                acms.append(checkout)
+
+        return {STATUS: STATUS_OK, 'acms': acms}
 
     def checkout(self):
         """
         Check out the database, if it is in an appropriate state to do so, ie, checked in.
         :return: {status: ok|denied, state:{db record}}
         """
-        if self.db_status != 'available':
-            return self.make_return('denied')
+        if self.db_state != 'available':
+            return self.make_return(STATUS_DENIED)
 
         # arguments to the checkout
-        username = self.event.get('name')  # name of requester
-        contact = self.event.get('contact')  # phone number of requester
-        version = self.event.get('version')  # current ACM version in format: r YY MM DD n (e.g. r1606221)
-        comment = self.event.get('comment')  # to allow for internal comments if later required
-        computername = self.event.get('computername')  # computer where checkout is taking place
+        username = self._name    # name of requester
+        contact = self._contact  # phone number of requester
+        version = self._version  # current ACM version in format: r YY MM DD n (e.g. r1606221)
+        comment = self._comment  # to allow for internal comments if later required
+        computername = self._computername  # computer where checkout is taking place
 
-        # Create a check-out entry for ACM in table
+        # Create a check-out entry for ACM in table. Pick a number between 0 and 10 million.
         new_key = str(randint(0, 10000000))  # generate new check-out key to use when checking ACM back in
         # Add it to the self.event object, so it will be logged
         self.event['key'] = new_key
-        self.event['filename'] = self.acm_record.get('last_in_file_name')
+        self.event['filename'] = self._checkout_record.get('last_in_file_name')
 
         update_expr = 'SET acm_state = :s, now_out_name = :n, now_out_contact = :c, now_out_key = :k, \
                                 now_out_version = :v, now_out_comment = :t, now_out_date = :d, \
@@ -230,35 +398,33 @@ class V1Handler:
 
     def checkin(self):
         # parameters received from HTTPS POST request
-        checkout_key = self.event.get('key')  # key must match check-key assigned at ACM check-out for check-in
+        checkout_key = self._key  # key must match check-key assigned at ACM check-out for check-in
 
-        if self.acm_record.get('acm_state') != CHECKED_OUT or self.acm_record.get('now_out_key') != checkout_key:
-            return self.make_return('denied', error='Not checked out by user')
+        if self._checkout_record.get('acm_state') != CHECKED_OUT or self._checkout_record.get(
+                'now_out_key') != checkout_key:
+            return self.make_return(STATUS_DENIED, error='Not checked out by user')
 
-        username = self.event.get('name')
-        filename = self.event.get(
-            'filename')  # tracks number of times ACM has been checked out, format db##.zip (e.g. db12.zip)
-        version = self.event.get('version')  # current ACM version in format: r YY MM DD n (e.g. r1606221)
+        filename = self._filename  # tracks number of times ACM has been checked out, format db##.zip (e.g. db12.zip)
+        version = self._version    # current ACM version in format: r YY MM DD n (e.g. r1606221)
 
         # passed into AWS update table item function: delete check-out info from entry and update check-in info
-        update_expr = build_remove_now_out(self.acm_record) + '\
+        update_expr = build_remove_now_out(self._checkout_record) + '\
                     SET acm_state = :s, \
                     last_in_file_name = :f, last_in_name = now_out_name, last_in_contact = now_out_contact, \
                     last_in_date = :d, last_in_comment = now_out_comment, last_in_version = :v'
 
-        condition_expr = 'now_out_key = :k and now_out_name = :n'  # only check-in if THIS user has THIS check-out
+        condition_expr = 'now_out_key = :k'  # only check-in if the user has THIS check-out
         expr_values = {  # expression values (required by AWS boto3)
             ':k': checkout_key,
             ':s': CHECKED_IN,
             ':f': filename,
             ':v': version,
-            ':n': username,
             ':d': now()
         }
 
         return self.update_db(update_expr, condition_expr, expr_values)
 
-    def abandon(self):
+    def discard(self):
         # noinspection PyUnusedLocal
         def condition_handler(err):
             """ Handler for conditonal update failure. It's fine if the failure is because someone else already
@@ -266,25 +432,26 @@ class V1Handler:
             :param err: ignored. 
             :return: a result structure if the exception is really OK, None otherwise, for default error handling. 
             """
-            if self.acm_record.get('acm_state') == CHECKED_IN or self.acm_record.get('now_out_key') != checkout_key:
+            if self._checkout_record.get('acm_state') == CHECKED_IN or self._checkout_record.get(
+                    'now_out_key') != checkout_key:
                 # Someone else released the record from under us. Count it as success.
-                return self.make_return('ok')
+                return self.make_return(STATUS_OK)
 
         # passed in POST parameters
-        checkout_key = self.event.get('key')  # key must match check-key assigned at ACM check-out for check-in
+        checkout_key = self._key  # key must match check-key assigned at ACM check-out for check-in
 
-        if self.acm_record.get('acm_state') != CHECKED_OUT or self.acm_record.get('now_out_key') != checkout_key:
-            return self.make_return('denied', error='Not checked out by user')
+        if self._checkout_record.get('acm_state') != CHECKED_OUT or self._checkout_record.get(
+                'now_out_key') != checkout_key:
+            return self.make_return(STATUS_OK)
 
-        username = self.event.get('name')
+        username = self._name
 
         # passed to AWS update table item function: delete check-out info and mark ACM as checked-in
-        update_expr = build_remove_now_out(self.acm_record) + 'SET acm_state = :s'
-        condition_expr = 'now_out_key = :k and now_out_name = :n'  # only check-in if THIS user has THIS check-out
+        update_expr = build_remove_now_out(self._checkout_record) + 'SET acm_state = :s'
+        condition_expr = 'now_out_key = :k'  # only check-in if the user has THIS check-out
         expr_values = {
             ':s': CHECKED_IN,
-            ':k': checkout_key,
-            ':n': username
+            ':k': checkout_key
         }
 
         return self.update_db(update_expr, condition_expr, expr_values, condition_handler)
@@ -297,32 +464,33 @@ class V1Handler:
             :param err: ignored. 
             :return: a result structure if the exception is really OK, None otherwise, for default error handling. 
             """
-            if self.acm_record.get('acm_state') == CHECKED_IN:
+            if self._checkout_record.get('acm_state') == CHECKED_IN:
                 # Someone else released the record from under us. Count it as success.
-                return self.make_return('ok')
+                return self.make_return(STATUS_OK)
 
-        update_expr = 'SET acm_state = :s ' + build_remove_now_out(self.acm_record)
-        condition_expr = ':s = :s'  # revoke check-out should always execute
+        update_expr = 'SET acm_state = :s ' + build_remove_now_out(self._checkout_record)
+        condition_expr = 'now_out_key = :k and acm_state = :o'  # revoke check-out should always execute
         expr_values = {
             ':s': CHECKED_IN,
+            ':k': self._key,
+            ':o': CHECKED_OUT
         }
 
         return self.update_db(update_expr, condition_expr, expr_values, condition_handler)
 
     def create(self):
-        if self.db_status != 'nodb':
-            return self.make_return('denied', error='DB already exists')
+        if self.db_state != 'nodb':
+            return self.make_return(STATUS_DENIED, error='DB already exists')
 
-        filename = self.event.get(
-            'filename')  # tracks number of times ACM has been checked out, format db##.zip (e.g. db12.zip)
-        username = self.event.get('name')  # name of requester
-        contact = self.event.get('contact')  # phone number of requester
-        comment = self.event.get('comment')  # to allow for internal comments if later required
-        version = self.event.get('version')  # current ACM version in format: r YY MM DD n (e.g. r1606221)
+        filename = self._filename  # tracks number of times ACM has been checked out, format db##.zip (e.g. db12.zip)
+        username = self._name  # name of requester
+        contact = self._contact  # phone number of requester
+        comment = self._comment  # to allow for internal comments if later required
+        version = self._version  # current ACM version in format: r YY MM DD n (e.g. r1606221)
 
         # passed to AWS update table item function: create entry for ACM in db
         update_expr = 'SET acm_state = :s, last_in_file_name = :f, last_in_name = :n, last_in_contact = :c, \
-                    last_in_date = :d, last_in_version = :v\
+                    last_in_date = :d, last_in_version = :v, \
                     acm_comment = :z'
         condition_expr = 'attribute_not_exists(last_in_name)'  # only perform if no check-in entry exists
         expr_values = {
@@ -338,17 +506,17 @@ class V1Handler:
         return self.update_db(update_expr, condition_expr, expr_values)
 
     def reset(self):
-        if self.acm_record.get('resettable', 'false').lower() != 'true':
-            return self.make_return('denied', error='DB is not resettable')
+        if self._checkout_record.get('resettable', 'false').lower() != 'true':
+            return self.make_return(STATUS_DENIED, error='DB is not resettable')
 
-        filename = self.event.get('filename', 'db1.zip')  # by convention, counts # of checkins
-        username = self.event.get('name', 'system')  # name of requester
-        contact = self.event.get('contact', 'techsupport@amplio.org')  # phone number of requester
-        comment = self.event.get('comment')  # to allow for internal comments if later required
-        version = self.event.get('version')  # current ACM version in format: r YY MM DD n (e.g. r1606221)
+        filename = self._filename or 'db1.zip'  # by convention, counts # of checkins
+        username = self._name or 'system'       # name of requester
+        contact = self._contact or 'techsupport@amplio.org'  # phone number of requester
+        comment = self._comment  # to allow for internal comments if later required
+        version = self._version  # current ACM version in format: r YY MM DD n (e.g. r1606221)
 
         # passed to AWS update table item function: create entry for ACM in db
-        update_expr = build_remove_now_out(self.acm_record) + 'SET acm_state = :s, last_in_file_name = :f, \
+        update_expr = build_remove_now_out(self._checkout_record) + 'SET acm_state = :s, last_in_file_name = :f, \
                     last_in_name = :n, last_in_contact = :c, last_in_date = :d, last_in_version = :v, \
                     acm_comment = :z'
         condition_expr = ':s = :s'  # always perform
@@ -363,6 +531,18 @@ class V1Handler:
         }
 
         return self.update_db(update_expr, condition_expr, expr_values)
+
+    def report(self):
+        fromaddr = self._body.get('from', "techsupport@amplio.org")
+        subject = self._body.get('subject')
+        body = self._body.get('body')
+        recipient = self._body.get('recipient', 'techsupport@amplio.org')
+        recipients = recipient if isinstance(recipient, list) else [recipient]
+        html = True if self._body.get('html') else False
+
+        ses_result = send_ses(fromaddr, subject, body, recipients, html)
+        print(f'ses_result: {str(ses_result)}')
+        return ses_result
 
 
 def v0_handler(event):
@@ -390,18 +570,18 @@ def v0_handler(event):
         if action == 'checkout':
             return check_out(event, acm)
         # user requested an unknown action
-        logger(event, 'denied', action_name='unknownAction')
+        logger(event, STATUS_DENIED, action_name='unknownAction')
         return {
-            'data': 'denied',
-            'status': 'denied',
+            'data': STATUS_DENIED,
+            STATUS: STATUS_DENIED,
             'response': 'Unknown action requested'
         }
     except Exception as err:
-        logger(event, 'denied')
+        logger(event, STATUS_DENIED)
         return {
             'response': 'Unexpected Error',
-            'data': 'denied',
-            'status': 'denied',
+            'data': STATUS_DENIED,
+            STATUS: STATUS_DENIED,
             'error': str(err)
         }
 
@@ -431,8 +611,8 @@ def check_in(event, acm):
     :return: a stringified JSON object (similar to check_out)
 
             must return following data parameters for each event case:
-                SUCCESS -- 'ok'
-                FAILURE -- 'denied'
+                SUCCESS -- STATUS_OK
+                FAILURE -- STATUS_DENIED
     """
     # parameters received from HTTPS POST request
     check_key = event.get('key')  # key must match check-key assigned at ACM check-out for check-in
@@ -447,20 +627,20 @@ def check_in(event, acm):
 
     # early return if ACM does not exist
     if not acm:
-        logger(event, 'denied')
+        logger(event, STATUS_DENIED)
         return {
             'response': 'Create new ACM',
-            'data': 'denied',
-            'status': 'denied'
+            'data': STATUS_DENIED,
+            STATUS: STATUS_DENIED
         }
 
     # early return if ACM not checked-out
     if acm.get('acm_state') == 'CHECKED_IN':
-        logger(event, 'denied')
+        logger(event, STATUS_DENIED)
         return {
             'response': 'ACM is already checked-in',
-            'data': 'denied',
-            'status': 'denied'
+            'data': STATUS_DENIED,
+            STATUS: STATUS_DENIED
         }
 
     # passed into AWS update table item function: delete check-out info from entry and update check-in info
@@ -481,9 +661,9 @@ def check_in(event, acm):
 
     # JSON response parameters
     json_resp = {
-        'success': {'response': 'SUCCESS. Checked in by ' + str(user_name), 'data': 'ok', 'status': 'ok'},
-        'failure': {'response': 'FAILED. Do not have permission to perform check-in', 'data': 'denied',
-                    'status': 'denied'}
+        'success': {'response': 'SUCCESS. Checked in by ' + str(user_name), 'data': STATUS_OK, STATUS: STATUS_OK},
+        'failure': {'response': 'FAILED. Do not have permission to perform check-in', 'data': STATUS_DENIED,
+                    STATUS: STATUS_DENIED}
     }
 
     # update dynamodb
@@ -500,15 +680,15 @@ def new_check_in(event, acm):
     :return: same as check_in function -- a stringified JSON object
 
             must return following data parameters for each event case:
-                SUCCESS -- 'ok'
-                FAILURE -- 'denied'
+                SUCCESS -- STATUS_OK
+                FAILURE -- STATUS_DENIED
     """
     if acm:
-        logger(event, 'denied')
+        logger(event, STATUS_DENIED)
         return {
             'response': 'ACM already exists',
-            'data': 'denied',
-            'status': 'denied'
+            'data': STATUS_DENIED,
+            STATUS: STATUS_DENIED
         }
 
     # parameters received from HTTPS POST request
@@ -533,9 +713,9 @@ def new_check_in(event, acm):
 
     # JSON response parameters
     json_resp = {
-        'success': {'response': 'SUCCESS. Created new ACM', 'data': 'ok', 'status': 'ok'},
-        'failure': {'response': 'FAILED. Do not have permission to perform check-in', 'data': 'denied',
-                    'status': 'denied'}
+        'success': {'response': 'SUCCESS. Created new ACM', 'data': STATUS_OK, STATUS: STATUS_OK},
+        'failure': {'response': 'FAILED. Do not have permission to perform check-in', 'data': STATUS_DENIED,
+                    STATUS: STATUS_DENIED}
     }
 
     return update_dynamo(event, update_expr, condition_expr, expr_values, json_resp)
@@ -550,8 +730,8 @@ def discard(event, acm):
     :return: a stringified JSON object
 
             must return following data parameters for each event case:
-                SUCCESS -- 'ok'
-                FAILURE -- 'denied'
+                SUCCESS -- STATUS_OK
+                FAILURE -- STATUS_DENIED
     """
     # passed in POST parameters
     user_name = event.get('name')
@@ -568,9 +748,9 @@ def discard(event, acm):
 
     # JSON response parameters
     json_resp = {
-        'success': {'response': 'SUCCESS. Discarded check-out info', 'data': 'ok', 'status': 'ok'},
-        'failure': {'response': 'FAILED. Do not have permission to perform discard', 'data': 'denied',
-                    'status': 'denied'}
+        'success': {'response': 'SUCCESS. Discarded check-out info', 'data': STATUS_OK, STATUS: STATUS_OK},
+        'failure': {'response': 'FAILED. Do not have permission to perform discard', 'data': STATUS_DENIED,
+                    STATUS: STATUS_DENIED}
     }
 
     return update_dynamo(event, update_expr, condition_expr, expr_values, json_resp)
@@ -591,7 +771,7 @@ def check_out(event, acm):
                 SUCCESS checked out         -- 'key=RANDOM_KEY', 'filename=COUNTER '
                 FAILURE already checked out -- 'possessor=NAME', 'filename=COUNTER '
                 FAILURE ACM does not exist  -- 'filename=NULL'
-                FAILURE error occurred      -- 'denied'    ###THIS NEEDS TO BE IMPLEMENTED ON JAVA SIDE
+                FAILURE error occurred      -- STATUS_DENIED    ###THIS NEEDS TO BE IMPLEMENTED ON JAVA SIDE
     """
     # parameters received from HTTPS POST request
     user_name = event.get('name')  # name of requester
@@ -633,11 +813,11 @@ def check_out(event, acm):
                              '2': 'filename=' + str(acm.get('last_in_file_name'))},
                     'key': new_key,
                     'filename': str(acm.get('last_in_file_name')),
-                    'status': 'ok'
+                    STATUS: STATUS_OK
                     },
         'failure': {'response': 'Your transaction was intercepted.',
-                    'data': 'denied',
-                    'status': 'denied'}
+                    'data': STATUS_DENIED,
+                    STATUS: STATUS_DENIED}
         # data: to be updated with interceptor's name & new file_name in update_dynamo function
     }
 
@@ -652,8 +832,8 @@ def revoke_check_out(event, acm):
     :return: a stringified JSON object
 
             must return following data parameters for each event case:
-                SUCCESS -- 'ok'
-                FAILURE -- 'denied'
+                SUCCESS -- STATUS_OK
+                FAILURE -- STATUS_DENIED
     """
 
     update_expr = 'SET acm_state = :s ' + build_remove_now_out(acm)
@@ -665,11 +845,11 @@ def revoke_check_out(event, acm):
     # JSON response parameters
     json_resp = {
         'success': {'response': 'Deleted check out entry',
-                    'data': 'ok',
-                    'status': 'ok'},
+                    'data': STATUS_OK,
+                    STATUS: STATUS_OK},
         'failure': {'response': 'Unexpected Error',
-                    'data': 'denied',
-                    'status': 'denied'}
+                    'data': STATUS_DENIED,
+                    STATUS: STATUS_DENIED}
         # data: updated with interceptor's name & new file_name in update_dynamo function
     }
 
@@ -686,7 +866,7 @@ def status_check(acm):
             must return following data parameters for each event case:
                 FAILURE already checked out -- 'possessor=NAME filename=COUNTER'
                 FAILURE ACM does not exist  -- 'filename=NULL'
-                FAILURE error occurred      -- 'denied'    ###THIS NEEDS TO BE IMPLEMENTED ON JAVA SIDE
+                FAILURE error occurred      -- STATUS_DENIED    ###THIS NEEDS TO BE IMPLEMENTED ON JAVA SIDE
     """
     # First time for a new ACM. Note that the filename is the string "NULL". That is most likely a PHP artifact
     # from the previous implementation of the checkout/checkin code.
@@ -695,7 +875,7 @@ def status_check(acm):
             'response': 'Create new ACM',
             'data': 'filename=NULL',  # filename:tracks number of times acm has been checked-out
             'filename': 'NULL',
-            'status': 'ok'
+            STATUS: STATUS_OK
         }
 
     if acm.get('acm_state') == CHECKED_OUT:
@@ -710,7 +890,7 @@ def status_check(acm):
             'filename': str(acm.get('last_in_file_name')),
             'opendate': str(acm.get('now_out_date')),
             'computername': str(acm.get('now_out_computername')),
-            'status': 'denied'
+            STATUS: STATUS_DENIED
         }
     return {
         'response': 'ACM available',
@@ -722,7 +902,7 @@ def status_check(acm):
         'saveby': str(acm.get('last_in_name')),
         'contact': str(acm.get('last_in_contact')),
         'savedate': str(acm.get('last_in_date')),
-        'status': 'ok'
+        STATUS: STATUS_OK
     }
 
 
@@ -749,7 +929,7 @@ def update_dynamo(event, update_expr, condition_expr, expr_values, json_resp):
             ConditionExpression=condition_expr,
             ExpressionAttributeValues=expr_values
         )
-        logger(event, 'ok')
+        logger(event, STATUS_OK)
         return json_resp['success']
     except Exception as err:
         # transaction intercepted: unexpected error or conditional check failed
@@ -765,7 +945,7 @@ def update_dynamo(event, update_expr, condition_expr, expr_values, json_resp):
                         logger(event, 'nop')  # log as no operation
                         return json_resp['success']
 
-                logger(event, 'denied')
+                logger(event, STATUS_DENIED)
                 if action == 'checkOut':  # update with interceptor name & new filename
                     json_resp['failure']['data'] = {'1': 'possessor=' + str(acm.get('now_out_name')),
                                                     '2': 'filename=' + str(acm.get('last_in_file_name'))}
@@ -774,11 +954,11 @@ def update_dynamo(event, update_expr, condition_expr, expr_values, json_resp):
                     json_resp['failure']['computername'] = str(acm.get('now_out_computername'))
                     json_resp['failure']['filename'] = str(acm.get('last_in_file_name'))
                 return json_resp['failure']
-        logger(event, 'denied')
+        logger(event, STATUS_DENIED)
         return {
             'response': 'Unexpected Error',
-            'data': 'denied',
-            'status': 'denied',
+            'data': STATUS_DENIED,
+            STATUS: STATUS_DENIED,
             'error': str(err)
         }
 
@@ -844,7 +1024,6 @@ def send_report(event):
 
     return send_ses(fromaddr, subject, body, recipients, html)
 
-
 # Format and send an ses message. Options are
 # html    - if true, send as html format
 # dry_run - if true, do not actually send email
@@ -852,7 +1031,7 @@ def send_ses(fromaddr,
              subject,
              body_text,
              recipients,
-             html):
+             html=False):
     """Send an email via the Amazon SES service.
 
     Example:
@@ -889,6 +1068,7 @@ if __name__ == "__main__":
         if 'db' not in args:
             args['db'] = 'ACM-TEST-NEW'
         return lambda_handler(args, None)
+
 
     print('Testing...')
     result = fn('dbcheck', db='ACM-TEST-NONE')
