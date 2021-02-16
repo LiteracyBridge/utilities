@@ -1,0 +1,11 @@
+--organization
+Amplio SW Development
+--parent-organization
+Amplio Testing
+--admin
+bill@amplio.org
+--s3
+--do-dropbox
+none
+--comment
+ACM database for testing dropbox-less

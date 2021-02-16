@@ -45,6 +45,8 @@ from amplio.rolemanager.Roles import *
 
 import boto3
 
+ACM_PREFIX = 'ACM-'
+
 REGION_NAME = 'us-west-2'
 BUCKET_NAME = 'acm-logging'
 TABLE_NAME = 'acm_check_out'
@@ -101,8 +103,8 @@ def cannonical_program_name(acm_name):
     if acm_name is None:
         return None
     acm_name = acm_name.upper()
-    if acm_name.startswith('ACM-'):
-        acm_name = acm_name[4:]
+    if acm_name.startswith(ACM_PREFIX):
+        acm_name = acm_name[len(ACM_PREFIX):]
     return acm_name
 
 
@@ -300,7 +302,18 @@ class V1Handler:
         # db = self._program
         program = self._program
         query_acm = table.get_item(Key={'acm_name': program})
-        self._checkout_record = query_acm.get('Item')
+        item = query_acm.get('Item')
+        # Hack to fix up to see ACM- decorated records.
+        if not item:
+            # Maybe 'FOO' is in db as 'ACM-FOO' but we looked for plain 'FOO'
+            if not program.startswith(ACM_PREFIX):
+                query_acm = table.get_item(Key={'acm_name': ACM_PREFIX + program})
+                item = query_acm.get('Item')
+                if item:
+                    # Found it, remember for later in the operation
+                    self._program = ACM_PREFIX + program
+        # end hack
+        self._checkout_record = item
 
     def make_return(self, status, **kwargs):
         retval = {STATUS: status, 'state': {}}
