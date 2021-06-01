@@ -47,7 +47,7 @@ _DIFF_SPECS = {
                                      'children': ['recipients']},
     programspec.Recipient.__name__: {'title': '{name}',
                                      'attributes': ['country', 'region', 'district', 'community', 'group_name', 'agent',
-                                                    'support_entity', 'model', 'language_code', 'recipientid',
+                                                    'support_entity', 'listening_model', 'language_code', 'recipientid',
                                                     'directory_name',
                                                     'variant', 'num_hhs', 'num_tbs'],
                                      'children': []}

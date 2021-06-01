@@ -78,7 +78,7 @@ class Exporter:
         """
         columns = ['recipientid', 'project', 'partner', 'communityname', 'groupname', 'affiliate',
                    'component', 'country', 'region', 'district', 'numhouseholds', 'numtbs',
-                   'supportentity', 'model', 'languagecode', 'coordinates', 'agent', 'latitude', 'longitude', 'variant']
+                   'supportentity', 'listening_model', 'languagecode', 'coordinates', 'agent', 'latitude', 'longitude', 'variant']
         computed_props = {'project': lambda: self._spec.project,
                           'affiliate': lambda: self._spec.affiliate,
                           'partner': lambda: self._spec.partner,

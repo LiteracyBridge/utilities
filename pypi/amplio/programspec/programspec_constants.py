@@ -33,6 +33,7 @@ NUM_TBS = '# TBs'
 SUPPORT_ENTITY = 'Support Entity'
 VARIANT = 'Variant'
 MODEL = 'Model'
+LISTENING_MODEL = 'Listening Model'
 
 LANGUAGE = 'Language'
 LANGUAGE_CODE = 'Language Code'
@@ -44,7 +45,7 @@ required_sheets = [GENERAL, CONTENT, DEPLOYMENTS]
 optional_sheets = [COMPONENTS]
 # These renames happen at the very beginning.
 columns_to_rename = {
-    'recipient': {LANGUAGE: LANGUAGE_CODE},
+    'recipient': {LANGUAGE: LANGUAGE_CODE, MODEL: LISTENING_MODEL},
     CONTENT: {LANGUAGE: LANGUAGE_CODE}
 }
 columns_to_remove = {
@@ -57,28 +58,28 @@ required_columns = {
     DEPLOYMENTS: [DEPLOYMENT_NO, START_DATE, END_DATE],
     COMPONENTS: [COMPONENT],
     'recipient': [COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, AGENT,
-                  POPULATION, NUM_HOUSEHOLDS, NUM_TBS, SUPPORT_ENTITY, MODEL, LANGUAGE_CODE]
+                  POPULATION, NUM_HOUSEHOLDS, NUM_TBS, SUPPORT_ENTITY, LISTENING_MODEL, LANGUAGE_CODE]
 }
 # Only these columns in the given sheet is *required* to have data. Other columns are still required, but can be blank.
 required_data = {
     CONTENT: [DEPLOYMENT_NO, PLAYLIST_TITLE, MESSAGE_TITLE, KEY_POINTS],
     DEPLOYMENTS: [DEPLOYMENT_NO, START_DATE, END_DATE],
-    'recipient': [COUNTRY, COMMUNITY, NUM_TBS, SUPPORT_ENTITY, MODEL, LANGUAGE_CODE]
+    'recipient': [COUNTRY, COMMUNITY, NUM_TBS, SUPPORT_ENTITY, LISTENING_MODEL, LANGUAGE_CODE]
 }
 optional_columns = {
     GENERAL: [AFFILIATE],
     CONTENT: [LANGUAGE_CODE, VARIANT], # [COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, MODEL, LANGUAGE],
-    DEPLOYMENTS: [COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, MODEL, LANGUAGE_CODE, VARIANT],
+    DEPLOYMENTS: [COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, LISTENING_MODEL, LANGUAGE_CODE, VARIANT],
     'recipient': [RECIPIENTID, DIRECTORY_NAME, VARIANT, TALKINGBOOKID]
 }
 # These columns are coerced to str() when loaded from the spreadsheet.
 string_columns = {
     GENERAL: [PARTNER, PROGRAM],
     CONTENT: [PLAYLIST_TITLE, MESSAGE_TITLE, KEY_POINTS, DEFAULT_CATEGORY, SDG_GOALS, SDG_TARGETS, LANGUAGE_CODE, VARIANT],
-    DEPLOYMENTS: [COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, MODEL, LANGUAGE_CODE, VARIANT],
+    DEPLOYMENTS: [COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, LISTENING_MODEL, LANGUAGE_CODE, VARIANT],
     COMPONENTS: [COMPONENT],
     'recipient': [AFFILIATE, PARTNER, COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, AGENT,
-                   SUPPORT_ENTITY, MODEL, LANGUAGE_CODE, RECIPIENTID, DIRECTORY_NAME, VARIANT, TALKINGBOOKID]
+                   SUPPORT_ENTITY, LISTENING_MODEL, LANGUAGE_CODE, RECIPIENTID, DIRECTORY_NAME, VARIANT, TALKINGBOOKID]
 }
 
 default_data = {
@@ -137,7 +138,9 @@ def check_names():
         '# TBs': 'num_tbs',
         'Support Entity': 'support_entity',
         'Variant': 'variant',
-        'Model': 'model',
+
+        #'Model': 'model', deprecated
+        'Listening Model': 'listening_model',
 
         # 'Language': 'language', deprecated
         'Language Code': 'language_code',
