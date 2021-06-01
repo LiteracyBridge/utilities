@@ -1,6 +1,7 @@
-import hashlib
+import json
 from datetime import datetime
-from typing import List, Dict
+from datetime import datetime
+from typing import List, Dict, Iterable
 
 import boto3
 from amplio.rolemanager import manager
@@ -21,6 +22,7 @@ manager.open_tables()
 WARNING_DATE = None
 OLD_POOL_ID = 'us-west-2_6EKGzq75p'
 
+
 def _email_from_event(event: dict) -> str:
     """
     Given a Cognito Trigger event, return the user's email address.
@@ -36,10 +38,18 @@ def _email_from_event(event: dict) -> str:
 
     return email
 
-def get_configured_repositories(programs: List[str], default: str = 'dbx', repositories=['s3']) -> Dict[str,List[str]]:
+
+def get_configured_repositories(programs: Iterable[str], default: str = 'dbx', repositories=None) -> Dict[
+    str, List[str]]:
     """
     Given a list of programs, find the ones that do not use the default repository.
+    :param programs: a list of the programs of interest.
+    :param default: the default repository. Programs configured with this repository are not included in the result.
+    :param repositories: a list of repositories of interest. Default is ['s3'].
+    :return: a dict of {repository:[program,...]}
     """
+    if repositories is None:
+        repositories = ['s3']
     default = default.lower()
     if default != 'dbx':
         print('Warning! get_configured_repositories called with non-standard default repository: {}'.format(default))
@@ -54,7 +64,22 @@ def get_configured_repositories(programs: List[str], default: str = 'dbx', repos
     return result
 
 
-def get_user_access(email, user_pool_id=None):
+def get_descriptions_for_programs(programs: Iterable[str]) -> Dict[str, str]:
+    """
+    Given a list of programs, find their descriptions.
+    :param programs: a list of programs.
+    :return: a dict of {program:description}
+    """
+    result = {}
+    program_items = programs_table.scan()['Items']
+    for item in program_items:
+        program = item.get('program')
+        if program in programs and 'description' in item:
+            result[program] = item.get('description')
+    return result
+
+
+def get_user_access(email: str, user_pool_id=None):
     """
     Given a user's email address, return their access as given in the acm_users table.
     Note that the access may be given to all users at the domain.
@@ -76,39 +101,34 @@ def get_user_access(email, user_pool_id=None):
             user_info = {'edit': '', 'view': '', 'admin': False}
 
     # program:roles;program:roles...
-    #programs = ';'.join([p+':'+r for p,r in manager.get_programs_for_user(email).items()])
     programs_for_user = manager.get_programs_for_user(email)
     # "s3:TEST;dbx:DEMO,XTEST-2"
-    configured_repositories = ';'.join(f'{k}:{",".join(v)}' for k,v in get_configured_repositories(list(programs_for_user.keys())).items())
+    configured_repositories = ';'.join(
+        f'{k}:{",".join(v)}' for k, v in get_configured_repositories(programs_for_user.keys()).items())
     print('Repositories: {}'.format(configured_repositories))
+    # 'DEMO:AD,PM;TEST:*,AD,PM,CO,FO'
     programs = ';'.join([p + ':' + r for p, r in programs_for_user.items()])
-
-    try:
-        md5 = hashlib.md5()
-        md5.update(email.lower().encode('utf-8'))
-        hash = md5.hexdigest()
-    except:
-        hash=None
+    descriptions = get_descriptions_for_programs(programs_for_user.keys())
     user_access = {'edit': user_info.get('edit', ''),
                    'view': user_info.get('view', ''),
                    'admin': user_info.get('admin', False),
-                   'programs': programs
-                   }
+                   'programs': programs,
+                   'descriptions': json.dumps(descriptions)
+                  }
     if configured_repositories:
         user_access['repositories'] = configured_repositories
-    if hash:
-        user_access['hash'] = hash
+
     # Warning to create new ID? Use Message-Of-Day facility.
-    if user_pool_id == OLD_POOL_ID:
-        global WARNING_DATE
-        if not WARNING_DATE:
-            WARNING_DATE = datetime(2021,1,25,0,0,0,0)
-        if datetime.now() > WARNING_DATE:
-            user_access['mod'] = 'Your sign-in was successful, and you may proceed.\n'+\
-                                 'However, due to necessary software maintenance, you\n'+\
-                                 'need to create a new Amplio ID by 2021-February-1.\n\n'+\
-                                 'Contact support@amplio.org if you need assistance.'
-            user_access['modButton'] = "Proceed"
+    # if user_pool_id == OLD_POOL_ID:
+    #     global WARNING_DATE
+    #     if not WARNING_DATE:
+    #         WARNING_DATE = datetime(2021, 1, 25, 0, 0, 0, 0)
+    #     if datetime.now() > WARNING_DATE:
+    #         user_access['mod'] = 'Your sign-in was successful, and you may proceed.\n' + \
+    #                              'However, due to necessary software maintenance, you\n' + \
+    #                              'need to create a new Amplio ID by 2021-February-1.\n\n' + \
+    #                              'Contact support@amplio.org if you need assistance.'
+    #         user_access['modButton'] = "Proceed"
 
     print('Access for user {}: {}'.format(email, user_access))
     return user_access
@@ -176,7 +196,8 @@ def token_generation_handler(event):
 def lambda_handler(event, context):
     print(event)
     trigger = event.get('triggerSource', '')
-    if trigger == 'TokenGeneration_Authentication' or trigger == 'TokenGeneration_RefreshTokens' or trigger.startswith('TokenGeneration'):
+    if trigger == 'TokenGeneration_Authentication' or trigger == 'TokenGeneration_RefreshTokens' or trigger.startswith(
+            'TokenGeneration'):
         token_generation_handler(event)
     elif trigger == 'PreSignUp_SignUp':
         pre_signup_handler(event)
@@ -187,6 +208,8 @@ def lambda_handler(event, context):
 # region Testing Code
 if __name__ == '__main__':
     import sys
+
+
     def simulate(trigger: str, email: str):
         event = {'triggerSource': trigger, 'request': {'userAttributes': {'email': email}}}
         result = None
@@ -233,12 +256,14 @@ if __name__ == '__main__':
 
         access = get_access('demo@amplio.org')
         print(access)
-        rc = 0 if access['edit'] == '' and access['view'] == 'DEMO' and access['admin'] == 'false' else 1
+        details = {x.split(':')[0]:x.split(':')[1] for x in access['programs'].split(';')}
+        rc = 0 if 'AD' in details['DEMO'] and 'PM' in details['UWR'] else 1
         rc_list.append(rc)
 
         access = get_access('@amplio.org')
         print(access)
-        rc = 0 if access['view'] == '.*' and access['admin'] == 'false' else 1
+        details = {x.split(':')[0]:x.split(':')[1] for x in access['programs'].split(';')}
+        rc = 0 if 'AD' in details['DEMO'] and 'PM' in details['UWR'] else 1
         rc_list.append(rc)
 
         programs = ['TEST', 'XTEST-2', 'DEMO']
