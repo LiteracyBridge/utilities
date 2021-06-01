@@ -1,6 +1,6 @@
 PROJECT = dashboardQueries
 PYTHON = python3.8
-VIRTUAL_ENV = .queryHelperEnv
+VIRTUAL_ENV = queryHelperEnv
 FUNCTION_NAME = service
 FUNCTION_HANDLER = lambda_handler
 AWS_REGION = us-west-2

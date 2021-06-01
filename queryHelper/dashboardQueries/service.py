@@ -88,6 +88,7 @@ choosable_columns = [
     'agent',
     'recipientid',
     'talkingbookid',
+    'deployment_uuid',
 
     'category',
     'playlist',
@@ -99,7 +100,8 @@ choosable_columns = [
     'duration_seconds',
     'position',
 
-    'timestamp',
+    'timestamp', # == stats_timestamp
+    'deployment_timestamp',
 
     'played_seconds',
     'completions',
@@ -377,10 +379,10 @@ def lambda_handler(event, context):
 if __name__ == '__main__':
     debug = True
     #             claims = event['requestContext']['authorizer'].get('claims', {})
-    event = {'requestContext': {'authorizer': {'claims': {'edit': '.*', 'view': '.*'}}},
+    event = {'requestContext': {'authorizer': {'claims': {'email': 'bill@amplio.org'}}},
              'path': 'handler/usage/UNICEF-2/5',
              'queryStringParameters': {
-                 'cols': 'deploymentnumber,district,count(talkingbookid),sum(played_seconds)/count(talkingbookid)as secs_per_tb'}}
+                 'cols': 'deploymentnumber,district,deployment_uuid,count(talkingbookid),sum(played_seconds)/count(talkingbookid)as secs_per_tb'}}
 
     result = lambda_handler(event, None)
     body = json.loads(result['body'])
