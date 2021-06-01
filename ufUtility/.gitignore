@@ -1,0 +1,6 @@
+a18mdenv/
+*.a18
+*.mp3
+__pycache__/
+dock_hello/
+ufUtilityEnv/

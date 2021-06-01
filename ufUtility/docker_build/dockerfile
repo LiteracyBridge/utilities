@@ -1,0 +1,12 @@
+FROM i386/debian
+
+COPY ./AudioBatchConverter /app/
+COPY ./conv.sh /app/
+
+RUN apt-get update
+RUN apt-get install -y ffmpeg 
+
+# Run with  docker run --rm --platform linux/386 --mount type=bind,source="$(pwd)/.",target=/audio dockerfile filename.from filename.to
+# Converts to or from .a18 file in audio
+WORKDIR /audio
+ENTRYPOINT ["/bin/bash", "/app/conv.sh"]
