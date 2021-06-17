@@ -2,6 +2,7 @@ import json
 import sys
 import time
 import traceback
+from typing import Tuple, List, Union
 
 import amplio.rolemanager.manager as roles_manager
 from amplio.rolemanager.Roles import *
@@ -19,11 +20,51 @@ STATUS_EXTRA_PARAMETER = 'Extraneous parameter'
 STATUS_ACCESS_DENIED = 'Access denied'
 STATUS_MISSING_PARAMETER = 'Missing parameter'
 
+DEFAULT_REPOSITORY = 'dbx'
+
+
+def get_program_info_for_user(email: str) -> Tuple[Dict[str, Dict[str, str]], str]:
+    # Start with the user's roles in programs, because that gets the list of relevant programs
+    programs_and_roles: Dict[str, str] = roles_manager.get_programs_for_user(email)
+    result: Dict[str, Dict[str, str]] = {p: {'roles': r} for p, r in programs_and_roles.items()}
+    programids: List[str] = [x for x in result.keys()]
+
+    # Add the friendly name, and collect repository info.
+    repository_programs: Dict[str, List[str]] = {}  # list of programs in each repository.
+    programs_table_items = roles_manager.rolesdb.get_program_items()  # programs_table.scan()['Items']
+    for programid in programids:
+        item = programs_table_items.get(programid)
+        program_repository = item.get('repository', DEFAULT_REPOSITORY).lower()
+        list = repository_programs.setdefault(program_repository, [])
+        list.append(programid)
+        result[programid]['name'] = item.get('program_name') or programid
+
+    # Find the repository with the most programs, and make that the implicit repository.
+    implicit_repo: Union[str,None] = None
+    max_prog = -1
+    for repo, program_list in repository_programs.items():
+        if len(program_list) > max_prog:
+            implicit_repo = repo
+            max_prog = len(program_list)
+    if implicit_repo:
+        del repository_programs[implicit_repo]
+    # Invert the repositories list into the result
+    for repo, program_list in repository_programs.items():
+        for programid in program_list:
+            result[programid]['repository'] = repo
+    return (result, implicit_repo)
+
 
 def do_get_programs(claims):
     email = claims.get('email')
-    program_roles = roles_manager.get_programs_for_user(email)
-    return {'output': program_roles, 'status': STATUS_OK}
+    program_info, implicit_repo = get_program_info_for_user(email)
+
+    return {  # 'output': program_roles,
+        'status': STATUS_OK,
+        'programs': program_info,
+        # 'repository': default_repository
+        'implicit_repository': implicit_repo
+    }
 
 
 def do_get_admin_objects(claims):
@@ -99,8 +140,8 @@ def lambda_handler(event, context):
         result['status'] = STATUS_FAILURE
         result['exception'] = 'Exception: {}'.format(ex)
 
-    print('Action: {}, claims: {}, data: {}, result: {}'.format(action, claims, data, result))
     end = time.time_ns()
+    print(f'Action: {action}, claims: {claims}, data: {data}, result: {result}, time {(end - start) / 1000000} msec.')
 
     return {
         'statusCode': 200,
@@ -154,6 +195,12 @@ if __name__ == '__main__':
         print(roles_result)
         print(test_get_programs(email='hacker@evil.com'))
         print(test_get_admin_objects(email='bill@amplio.org'))
+
+        start = time.time_ns()
+        pi, implicit_repo = get_program_info_for_user('bill@amplio.org')
+        end = time.time_ns()
+        print(f'Query took {(end - start) / 1000000} ms: {pi}')
+        print(implicit_repo)
 
 
     def _main():

@@ -32,28 +32,35 @@ copy_python:
 	if test -d $(VIRTUAL_ENV)/lib64; then cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; fi
 
 remove_unused:
-	rm -rf ./package/tmp/wheel*
-	rm -rf ./package/tmp/easy_install*
-	rm -rf ./package/tmp/setuptools*
-	rm -rf ./package/tmp/pip*
-	rm -rf ./package/tmp/botocore*
-	rm -rf ./package/tmp/boto3*
-	rm -rf ./package/tmp/s3transfer*
 	rm -rf ./package/tmp/.gitignore
 	rm -rf ./package/tmp/.idea
+	rm -rf ./package/tmp/boto3*
+	rm -rf ./package/tmp/botocore*
+	rm -rf ./package/tmp/urllib3*
+	rm -rf ./package/tmp/dateutil*
+	rm -rf ./package/tmp/jmespath*
+	rm -rf ./package/tmp/six*
+	rm -rf ./package/tmp/python_dateutil*
+	rm -rf ./package/tmp/easy_install*
+	rm -rf ./package/tmp/pip*
 	rm -rf ./package/tmp/pkg_resources*
+	rm -rf ./package/tmp/s3transfer*
+	rm -rf ./package/tmp/setuptools*
+	rm -rf ./package/tmp/wheel*
 	find ./package/tmp -iname __pycache__ -type d -exec rm -rf {} +
 	rm -rf ./package/tmp/amplio-*.egg-info
 
+	rm -rf ./package/tmp/et_xmlfile*
 	rm -rf ./package/tmp/jdcal*
 	rm -rf ./package/tmp/openpyxl*
 	rm -rf ./package/tmp/pip*
-	rm -rf ./package/tmp/et_xmlfile*
     
 	rm -rf ./package/tmp/awscli*
 	rm -rf ./package/tmp/colorama*
-	rm -rf ./package/tmp/rsa*
 	rm -rf ./package/tmp/pyasn1*
+	rm -rf ./package/tmp/rsa*
+
+	rm -rf ./package/tmp/amplio/programspec*
 
 
 zip:

@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from datetime import datetime
-from typing import List, Dict, Iterable
+from typing import List, Dict, Iterable, Tuple
 
 import boto3
 from amplio.rolemanager import manager
@@ -14,8 +14,10 @@ dynamodb = boto3.resource('dynamodb', region_name=REGION_NAME)
 users_table = dynamodb.Table(USERS_TABLE_NAME)
 programs_table = dynamodb.Table(PROGRAMS_TABLE_NAME)
 
-USER_POOL_ID = 'us-west-2_6EKGzq75p'
+USER_POOL_ID = 'us-west-2_3evpQGyi5'
 cognito_client = boto3.client('cognito-idp')
+
+DEFAULT_REPOSITORY = 'dbx'
 
 manager.open_tables()
 
@@ -39,7 +41,7 @@ def _email_from_event(event: dict) -> str:
     return email
 
 
-def get_configured_repositories(programs: Iterable[str], default: str = 'dbx', repositories=None) -> Dict[
+def get_configured_repositories(programs: Iterable[str], default: str = DEFAULT_REPOSITORY, repositories=None) -> Dict[
     str, List[str]]:
     """
     Given a list of programs, find the ones that do not use the default repository.
@@ -64,18 +66,18 @@ def get_configured_repositories(programs: Iterable[str], default: str = 'dbx', r
     return result
 
 
-def get_descriptions_for_programs(programs: Iterable[str]) -> Dict[str, str]:
+def get_names_for_programs(programs: Iterable[str]) -> Dict[str, str]:
     """
-    Given a list of programs, find their descriptions.
+    Given a list of programs, find their friendly (ie, customer given) name.
     :param programs: a list of programs.
-    :return: a dict of {program:description}
+    :return: a dict of {program:friendly-name}
     """
     result = {}
     program_items = programs_table.scan()['Items']
     for item in program_items:
         program = item.get('program')
-        if program in programs and 'description' in item:
-            result[program] = item.get('description')
+        if program in programs and 'program_name' in item:
+            result[program] = item.get('program_name')
     return result
 
 
@@ -107,14 +109,14 @@ def get_user_access(email: str, user_pool_id=None):
         f'{k}:{",".join(v)}' for k, v in get_configured_repositories(programs_for_user.keys()).items())
     print('Repositories: {}'.format(configured_repositories))
     # 'DEMO:AD,PM;TEST:*,AD,PM,CO,FO'
-    programs = ';'.join([p + ':' + r for p, r in programs_for_user.items()])
-    descriptions = get_descriptions_for_programs(programs_for_user.keys())
+    program_roles = ';'.join([p + ':' + r for p, r in programs_for_user.items()])
+    names = get_names_for_programs(programs_for_user.keys())
     user_access = {'edit': user_info.get('edit', ''),
                    'view': user_info.get('view', ''),
                    'admin': user_info.get('admin', False),
-                   'programs': programs,
-                   'descriptions': json.dumps(descriptions)
-                  }
+                   'programs': program_roles,
+                   'descriptions': json.dumps(names)
+                   }
     if configured_repositories:
         user_access['repositories'] = configured_repositories
 
@@ -256,13 +258,13 @@ if __name__ == '__main__':
 
         access = get_access('demo@amplio.org')
         print(access)
-        details = {x.split(':')[0]:x.split(':')[1] for x in access['programs'].split(';')}
+        details = {x.split(':')[0]: x.split(':')[1] for x in access['programs'].split(';')}
         rc = 0 if 'AD' in details['DEMO'] and 'PM' in details['UWR'] else 1
         rc_list.append(rc)
 
         access = get_access('@amplio.org')
         print(access)
-        details = {x.split(':')[0]:x.split(':')[1] for x in access['programs'].split(';')}
+        details = {x.split(':')[0]: x.split(':')[1] for x in access['programs'].split(';')}
         rc = 0 if 'AD' in details['DEMO'] and 'PM' in details['UWR'] else 1
         rc_list.append(rc)
 

@@ -225,6 +225,7 @@ def initialize_programspec(program_id: str, is_s3: bool) -> bool:
     """
     print(f'Creating program spec for {program_id}...', end='')
     if is_s3:
+        # Copy the template program spec .xlsx file to the s3 progspec bucket.
         data:bytes = fetch_template_progspec()
         key = f'{program_id}/program_spec.xlsx'
         print(f"writing program spec to 's3://{projspec_bucket}/{key}'...", end='')
@@ -234,6 +235,7 @@ def initialize_programspec(program_id: str, is_s3: bool) -> bool:
             print('ok\n  -- Download the spec, edit appropriately, and use the dashboard to submit')
             return True
     else:
+        # Copy the template program spec .xlsx file to the programspec directory in Dropbox.
         acm_path = canonical_acm_path_name(program_id)
         progspec_dir = Path(acm_path, 'programspec')
         progspec_dir.mkdir(parents=True, exist_ok=True)

@@ -83,7 +83,7 @@ def check_for_program_record(program_id) -> bool:
 
 
 def create_program_record(program_id: str, organization: str, admin_email: Union[None, str], is_s3: bool,
-                          comment: str) -> bool:
+                          name: str) -> bool:
     """
     Create the record in the program DynamoDB table. Lists roles, description, and repository for
     programs.
@@ -94,14 +94,13 @@ def create_program_record(program_id: str, organization: str, admin_email: Union
     :admin_email: the email of the program administrator, if known.
     :return: True if successful, False otherwise.
     """
-    description = comment
     print('Creating program record for {} in organization {}'.format(program_id, organization), end='')
-    # update_expr = 'SET organization = :o, description = :d'
+    # update_expr = 'SET organization = :o, program_name = :n'
     # expr_values = {
     #     ':o': organization,
-    #     ':d': description
+    #     ':n': name
     # }
-    item = {'program': program_id, 'organization': organization, 'description': description}
+    item = {'program': program_id, 'organization': organization, 'program_name': name}
     if admin_email:
         # Populate a new record
         item['roles'] = {admin_email: ADMIN_ROLES}
