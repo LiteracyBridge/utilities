@@ -1,23 +1,22 @@
 PROJECT = psutil
-PYTHON = python3.7
-# pyinstaller does not yet (2020-04-01) work with python 3.8
-VIRTUAL_ENV = .virtual376
+PYTHON = python3.8
+VIRTUAL_ENV = psutilenv
 
 # Default commands
 help: helper
-# install: virtual
+install: virtual
 build: build_package_tmp
 
 helper:
-	echo "update, build"
+	echo "install, update, build"
 
 build_package_tmp:
 	pyinstaller --onefile psutil.py
 
-# virtual:
-# 	@echo "--> Setup and activate virtualenv"
-# 	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv $(VIRTUAL_ENV); fi
-# 	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
+virtual:
+	@echo "--> Setup and activate virtualenv"
+	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv $(VIRTUAL_ENV); fi
+	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
 
 update:
 	pip3 install --upgrade amplio

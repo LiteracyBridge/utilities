@@ -7,5 +7,6 @@ jdcal==1.4
 macholib==1.11
 openpyxl==2.6.2
 pefile==2018.8.8
-PyInstaller>=3.6
+pyinstaller==4.4
+pyinstaller-hooks-contrib==2021.2
 python-Levenshtein==0.12.0

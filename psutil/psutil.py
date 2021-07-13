@@ -133,16 +133,20 @@ Commands:
 ENSURE_TRAILING_SLASH = ['--outdir']
 
 
-class store_path(argparse.Action):
+class StorePathAction(argparse.Action):
     def __init__(self, option_strings, dest, nargs=None, **kwargs):
         if nargs is not None:
             raise ValueError("nargs not allowed")
-        super(store_path, self).__init__(option_strings, dest, **kwargs)
+        super(StorePathAction, self).__init__(option_strings, dest, **kwargs)
 
     def __call__(self, parser, namespace, values, option_string=None):
         values = expanduser(values)
-        if option_string in ENSURE_TRAILING_SLASH and values[-1:] != '/':
-            values += '/'
+        try:
+            # noinspection PyUnresolvedReferences
+            if option_string in ENSURE_TRAILING_SLASH and values[-1:] != '/':
+                values += '/'
+        except Exception:
+            pass  # ignore
         setattr(namespace, self.dest, values)
 
 
@@ -291,9 +295,9 @@ def main():
 
     arg_parser.add_argument('--verbose', '-v', action='count', default=0, help='More verbose output.')
     arg_parser.add_argument('--acm', help='Name of the ACM project')
-    arg_parser.add_argument('--dropbox', action=store_path, default=expanduser('~/Dropbox'),
+    arg_parser.add_argument('--dropbox', action=StorePathAction, default=expanduser('~/Dropbox'),
                             help='Dropbox directory (default is ~/Dropbox).')
-    arg_parser.add_argument('--outdir', action=store_path, default='.', metavar='DIR',
+    arg_parser.add_argument('--outdir', action=StorePathAction, default='.', metavar='DIR',
                             help='Directory for output files (default ".")')
     arg_parser.add_argument('--out', metavar='XLSX', nargs='?', default='{dir}{name}-new{ext}',
                             const='{dir}{name}-new{ext}', help='Create a new, updated Program Specification. An '
@@ -307,12 +311,12 @@ def main():
     # create the parser for the "validate" command
     validate_parser = subparsers.add_parser('validate', help='Validation help', description='Validate a spreadsheet.')
     # validate_parser.add_argument('--fix-recips', '-f', action='store_true', help='Fix missing recipient ids & directory names.')
-    validate_parser.add_argument('xlsx', metavar='XLSX', action=store_path, help='The spreadsheet.')
+    validate_parser.add_argument('xlsx', metavar='XLSX', action=StorePathAction, help='The spreadsheet.')
     validate_parser.set_defaults(func=do_validation)
 
     # create the parser for the "reconcile" command
     reconcile_parser = subparsers.add_parser('reconcile', help='Reconcile help')
-    reconcile_parser.add_argument('xlsx', metavar='XLSX', action=store_path, help='The spreadsheet.')
+    reconcile_parser.add_argument('xlsx', metavar='XLSX', action=StorePathAction, help='The spreadsheet.')
     reconcile_parser.add_argument('--strategy', type=int, default=4,
                                   help='What strategy was used in creating directory names?',
                                   choices=[0, 1, 2, 3, 4])
@@ -323,13 +327,13 @@ def main():
 
     # create the parser for the "export" command
     export_parser = subparsers.add_parser('export', help='Export .csv files from the spreadsheet.')
-    export_parser.add_argument('xlsx', metavar='XLSX', action=store_path, help='The spreadsheet.')
+    export_parser.add_argument('xlsx', metavar='XLSX', action=StorePathAction, help='The spreadsheet.')
     export_parser.set_defaults(func=do_exports)
 
     # create the parser for the "diff" command
     diff_parser = subparsers.add_parser('diff', help='Show the changes between program specs.')
-    diff_parser.add_argument('xlsx', metavar='XLSX', action=store_path, help='The original spreadsheet.')
-    diff_parser.add_argument('xlsx2', metavar='XLSX', action=store_path, help='The new spreadsheet.')
+    diff_parser.add_argument('xlsx', metavar='XLSX', action=StorePathAction, help='The original spreadsheet.')
+    diff_parser.add_argument('xlsx2', metavar='XLSX', action=StorePathAction, help='The new spreadsheet.')
     diff_parser.set_defaults(func=do_diff)
 
     args = arg_parser.parse_args()
