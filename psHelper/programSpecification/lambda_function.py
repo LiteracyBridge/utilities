@@ -645,7 +645,7 @@ if __name__ == '__main__':
         from os.path import expanduser
         from pathlib import Path
 
-        _PROGRAM='XTEST'
+        _PROGRAM='TEST'
 
         def test_submit(fn, comment='No commment provided.'):
             print('\nSubmit {}:'.format(fn))
@@ -662,6 +662,21 @@ if __name__ == '__main__':
             print(submit_result)
             print('Submit ' + submit_result['status'])
             return submit_result.get('PendingId')
+
+        def test_validate(fn):
+            print('\nValidate {}:'.format(fn))
+            bytes_read = open(expanduser(fn), "rb").read()
+            body_data = binascii.b2a_base64(bytes_read)
+
+            submit_event = {'requestContext': {'authorizer': {'claims': claims}},
+                            'pathParameters': {'proxy': 'validate'}, 'queryStringParameters': {'program': _PROGRAM,
+                                                                                             'fix_recips': True},
+                            'body': body_data}
+            result = lambda_handler(submit_event, {})
+            submit_result = json.loads(result['body']).get('result', {})
+            print(submit_result)
+            print('Validate ' + submit_result['status'])
+
 
         def test_approve(current, pending, comment='No comment provided.'):
             print('\nApprove {} replacing {}:'.format(pending, current))
@@ -714,35 +729,45 @@ if __name__ == '__main__':
             result = lambda_handler(event, {})
             return result
 
-        claims = {'edit': '.*', 'view': '.*', 'email': 'billev2k@gmail.com'}
+        claims = {'edit': '.*', 'view': '.*', 'email': 'bill@amplio.org'}
         print('Just testing')
 
-        obj_list = test_list()
+        def test_browser():
+            obj_list1 = test_list()
 
-        pending_id = test_submit('~/Dropbox/ACM-'+_PROGRAM+'/programspec/'+_PROGRAM+'-ProgramSpecification.xlsx',
-                                 comment='First test program spec.')
-        obj_list = test_list()
+            pending_id = test_submit(f'~/Dropbox/ACM-{_PROGRAM}/programspec/{_PROGRAM}-ProgramSpecification.xlsx',
+                                     comment='First test program spec.')
+            obj_list = test_list()
 
-        current_id = test_approve(current=obj_list.get('CurrentId'), pending=pending_id,
-                                  comment='First approved program specification')
-        obj_list = test_list()
+            current_id = test_approve(current=obj_list.get('CurrentId'), pending=pending_id,
+                                      comment='First approved program specification')
+            obj_list1 = test_list()
 
-        pending_id = test_submit('~/Dropbox/ACM-'+_PROGRAM+'/programspec/'+_PROGRAM+'-ProgramSpecification-updated.xlsx',
-                                 comment='Second submitted program spec.')
-        obj_list = test_list()
-        test_diff('current', 'pending')
-        test_diff('current', '~/Dropbox/ACM-TEST/programspec/TEST-ProgramSpecification.xlsx')
-        test_diff('pending', 'current')
+            pending_id = test_submit(f'~/Dropbox/ACM-{_PROGRAM}/programspec/{_PROGRAM}-ProgramSpecification-updated.xlsx',
+                                     comment='Second submitted program spec.')
+            obj_list3 = test_list()
+            test_diff('current', 'pending')
+            test_diff('current', '~/Dropbox/ACM-DEMO/programspec/program_spec.xlsx')
+            test_diff('pending', 'current')
 
-        current_id = test_approve(current=current_id, pending=pending_id, comment='Second approved program spec.')
-        obj_list = test_list()
+            current_id = test_approve(current=current_id, pending=pending_id, comment='Second approved program spec.')
+            obj_list4 = test_list()
 
-        pending_id = test_submit('~/Dropbox/ACM-'+_PROGRAM+'/programspec/'+_PROGRAM+'-ProgramSpecification.xlsx',
-                                 comment='Third submitted program spec.')
-        obj_list = test_list()
+            pending_id = test_submit(f'~/Dropbox/ACM-{_PROGRAM}/programspec/{_PROGRAM}-ProgramSpecification.xlsx',
+                                     comment='Third submitted program spec.')
+            obj_list5 = test_list()
 
-        get_result = test_get('content.csv')
-        get_result = test_get('recipients.csv')
+            get_result = test_get('content.csv')
+            get_result = test_get('recipients.csv')
 
+        def test_desktop():
+            test_diff('current', 'pending')
+            test_approve('jFZYqbGjbfl6Bh0nbsJhxerGxRI01Y31', '3OBTbIr.ynTBKcu_BbJWAtfVA.9C3NkA')
+
+        def manual_update():
+            test_list()
+            test_validate('~/Downloads/Program Specification_UNICEF Ethiopia (1)[24].xlsx')
+
+        test_browser()
 
     __test__()
