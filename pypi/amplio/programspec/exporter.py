@@ -78,7 +78,8 @@ class Exporter:
         """
         columns = ['recipientid', 'project', 'partner', 'communityname', 'groupname', 'affiliate',
                    'component', 'country', 'region', 'district', 'numhouseholds', 'numtbs',
-                   'supportentity', 'listening_model', 'languagecode', 'coordinates', 'agent', 'latitude', 'longitude', 'variant']
+                   'supportentity', 'listening_model', 'languagecode', 'coordinates', 'agent',
+                   'latitude', 'longitude', 'variant', 'group_size']
         computed_props = {'project': lambda: self._spec.project,
                           'affiliate': lambda: self._spec.affiliate,
                           'partner': lambda: self._spec.partner,
@@ -86,7 +87,7 @@ class Exporter:
                           'coordinates': lambda: None,
                           'latitude': lambda: None,
                           'longitude': lambda: None}
-        numeric_props = {'numhouseholds', 'numtbs'}
+        numeric_props = {'numhouseholds', 'numtbs', 'group_size'}
         coordinate_props = {'coordinates', 'latitude', 'longitude'}
         property_map = {'communityname': 'community', 'groupname': 'group_name',
                         'numhouseholds': 'num_hh', 'numtbs': 'num_tbs',

@@ -26,6 +26,7 @@ REGION = 'Region'
 DISTRICT = 'District'
 COMMUNITY = 'Community'
 GROUP_NAME = 'Group Name'
+GROUP_SIZE = 'Group Size'
 AGENT = 'Agent'
 POPULATION = 'Population'
 NUM_HOUSEHOLDS = '# HH'
@@ -70,7 +71,7 @@ optional_columns = {
     GENERAL: [AFFILIATE],
     CONTENT: [LANGUAGE_CODE, VARIANT], # [COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, MODEL, LANGUAGE],
     DEPLOYMENTS: [COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, LISTENING_MODEL, LANGUAGE_CODE, VARIANT],
-    'recipient': [RECIPIENTID, DIRECTORY_NAME, VARIANT, TALKINGBOOKID]
+    'recipient': [GROUP_SIZE, RECIPIENTID, DIRECTORY_NAME, VARIANT, TALKINGBOOKID]
 }
 # These columns are coerced to str() when loaded from the spreadsheet.
 string_columns = {
@@ -132,6 +133,7 @@ def check_names():
         'District': 'district',
         'Community': 'community',
         'Group Name': 'group_name',
+        'Group Size': 'group_size',
         'Agent': 'agent',
         'Population': 'population',
         '# HH': 'num_hh',
