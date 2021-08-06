@@ -45,6 +45,16 @@ _DEFAULT_PROVISIONING = {'ReadCapacityUnits': 1, 'WriteCapacityUnits': 1}
 
 class RolesDb:
     def __init__(self, **kwargs):
+        """
+        Initializes a RolesDb object.
+
+        Parameters:
+            localdb: if present and truthy, uses a localhost version of DyanmoDB, otherwise uses real DynamoDB
+            delete_tables: if present and truthy, deletes existing tables.
+            create_tables: if present and truthy, creates the tables, if they don't already exist.
+
+        When the function returns, the tables have been opened, if possible.
+        """
         self._localdb = kwargs.get('localdb', False)
         if self._localdb:
             endpoint_url = kwargs.get('endpoint_url', 'http://localhost:8008')

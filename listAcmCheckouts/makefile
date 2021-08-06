@@ -1,6 +1,6 @@
 PROJECT = listAcmCheckouts
 PYTHON = python3.8
-VIRTUAL_ENV = .lc_env
+VIRTUAL_ENV = listAcmCheckoutsEnv
 FUNCTION_NAME = listAcmCheckouts
 FUNCTION_HANDLER = lambda_function.lambda_handler
 FUNCTION_ROLE = arn:aws:iam::856701711513:role/lambda-checkout
@@ -17,7 +17,7 @@ helper:
 
 virtual:
 	@echo "--> Setup and activate virtualenv"
-	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv --system-site-packages $(VIRTUAL_ENV); fi
+	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv $(VIRTUAL_ENV); fi
 	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
 
 clean_package:
@@ -58,7 +58,7 @@ zip:
 	date
 
 update:
-	pip install --upgrade amplio
+	pip3 install --upgrade amplio
 
 upload_lambda:
 	aws lambda update-function-code --function-name $(FUNCTION_NAME) --zip-file fileb://./package/$(PROJECT).zip

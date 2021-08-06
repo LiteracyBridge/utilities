@@ -5,7 +5,7 @@ import traceback
 
 import amplio.rolemanager.manager as roles_manager
 import boto3
-from amplio.rolemanager.roles import *
+from amplio.rolemanager.Roles import *
 
 """
 Management of TB-Loader ids and serial numbers.
@@ -133,13 +133,13 @@ if __name__ == '__main__':
             result = lambda_handler(submit_event, {})
             return result
 
-        claims = {'edit': '.*', 'view': '.*', 'email': 'bill@amplio.org'}
+        claims = {'email': 'bill@amplio.org'}
         print('Just testing')
 
         reserve_result = test_reserve()
         print(reserve_result)
 
-        claims = {'edit': '', 'view': 'demo', 'email': 'bill@amplio.org'}
+        claims = {'email': 'bill@amplio.org'}
         reserve_result = test_reserve('demo@amplio.org')
         print(reserve_result)
 

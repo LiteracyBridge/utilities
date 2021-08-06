@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Tuple, Union, List
 
 from amplio.rolemanager import Roles
 from amplio.rolemanager.rolesdb import *
@@ -67,6 +67,8 @@ API:
 
 rolesdb: RolesDb
 
+# Email domains not allowed for "wild card" roles. Don't give a role to @gmail.com.
+EXCLUDED_EMAIL_DOMAINS = ['@gmail.com', '@icloud.com', '@yahoo.com']
 
 def open_tables(**kwargs):
     global rolesdb
@@ -77,6 +79,8 @@ def open_tables(**kwargs):
 def _normalize_role_list(*args: str) -> str:
     return Roles.normalize(*args)
 
+def _normalize_email(email: str) -> str:
+    return email.lower().strip()
 
 # Given one or more dict(s) of {email : role_str}, merge the dicts and normalize the roles.
 def _merge_roles_dicts(*args: Dict[str, str]) -> Dict[str, str]:
@@ -84,7 +88,7 @@ def _merge_roles_dicts(*args: Dict[str, str]) -> Dict[str, str]:
     for arg in args:
         for b_email, b_roles in arg.items():
             a_roles = result.get(b_email, '')
-            result[b_email] = Roles.normalize(a_roles, b_roles)
+            result[b_email] = _normalize_role_list(a_roles, b_roles)
     return result
 
 
@@ -103,7 +107,10 @@ def invalidate_caches():
     rolesdb.invalidate_caches()
 
 
-def get_organizations_for_organization(org):
+def get_organizations_for_organization(org: str) -> List[str]:
+    """
+    Returns the organization and any chain of parent organizations.
+    """
     result = [org]
     item = rolesdb.get_organization_items().get(org, {})
     if ORGS_PARENT_FIELD in item:
@@ -111,14 +118,25 @@ def get_organizations_for_organization(org):
     return result
 
 
-def get_organizations_for_program(program):
+def get_organizations_for_program(program: str) -> List[str]:
+    """
+    Returns a list of the owning organization, and all parent organizations, for the given programid.
+
+    Parameters:
+        program: the programid for which organizations are desired.
+    """
     item = rolesdb.get_program_items().get(program, {})
     return get_organizations_for_organization(item.get(PROGRAMS_ORG_FIELD))
 
 
-# Given a program, gets the roles defined directly for the program, and any inherited from
-# the program's organization and any supporting organization(s).
 def get_roles_for_program(program: str) -> Dict[str, str]:
+    """
+    Returns a dict of {email: rolestr} for the roles defined for a program, its organization,
+    and any chain of parent organizations.
+
+    Parameters:
+        program: the programid for which roles are desired.
+    """
     program_record = rolesdb.get_program_items().get(program, {})
     program_roles: Dict[str, str] = program_record.get(PROGRAMS_ROLES_FIELD, {})
     org_roles: Dict[str, str] = get_roles_for_organization(program_record.get(PROGRAMS_ORG_FIELD))
@@ -126,6 +144,14 @@ def get_roles_for_program(program: str) -> Dict[str, str]:
 
 
 def get_roles_for_user_in_program(email: str, program: str) -> str:
+    """
+    Returns a string of comma-separated roles assigned to the given user in the given program.
+
+    Parameters:
+        email: the email address of the user for whom the roles are desired.
+        program: the programid of the program for which the user's roles are desired.
+    """
+    email = _normalize_email(email)
     program_roles: Dict[str, str] = get_roles_for_program(program)
     # Roles directly assigned to user
     user_roles_str: str = program_roles.get(email, '')
@@ -135,10 +161,11 @@ def get_roles_for_user_in_program(email: str, program: str) -> str:
     email_domain = '@' + email_split[1] if len(email_split) == 2 and len(email_split[0]) > 0 else None
     domain_roles_str = program_roles.get(email_domain, '')
 
-    return Roles.normalize(user_roles_str, domain_roles_str)
+    return _normalize_role_list(user_roles_str, domain_roles_str)
 
 
 def get_roles_for_user_in_organization(email: str, org: str) -> str:
+    email = _normalize_email(email)
     org_roles: Dict[str, str] = get_roles_for_organization(org)
     # Roles directly assigned to user
     user_roles_str: str = org_roles.get(email, '')
@@ -148,12 +175,17 @@ def get_roles_for_user_in_organization(email: str, org: str) -> str:
     email_domain = '@' + email_split[1] if len(email_split) == 2 and len(email_split[0]) > 0 else None
     domain_roles_str = org_roles.get(email_domain, '')
 
-    return Roles.normalize(user_roles_str, domain_roles_str)
+    return _normalize_role_list(user_roles_str, domain_roles_str)
 
 
-# Given an organization, gets the roles defined directly by the organization, and any inherited from
-# any supporting organization(s).
 def get_roles_for_organization(org: str) -> Dict[str, str]:
+    """
+    Returns a dict of {email: rolestr} for the roles defined for an organization and any chain of
+    parent organizations.
+
+    Parameters:
+        program: the organization for which roles are desired.
+    """
     if not org:
         return {}
     org_record = rolesdb.get_organization_items().get(org, {})
@@ -164,6 +196,10 @@ def get_roles_for_organization(org: str) -> Dict[str, str]:
 
 
 def get_defined_roles_for_user(email: str) -> Dict[str, Dict[str, str]]:
+    """
+    Only used in tests.
+    """
+    email = _normalize_email(email)
     # Roles assigned through organization email (ie, domain name)
     email_split = email.split('@')
     # Only look for the org part this if the address is like me@example.com
@@ -196,10 +232,15 @@ def get_defined_roles_for_user(email: str) -> Dict[str, Dict[str, str]]:
 
 
 def get_admin_objects_for_user(email: str):
+    """
+    Only used in tests.
+    """
+    email = _normalize_email(email)
     email_split = email.split('@')
     email_domain = '@' + email_split[1] if len(email_split) == 2 and len(email_split[0]) > 0 else None
 
     # Build a tree of the organizations.
+    # {org_name: {'name': org_name, 'roles': '...', 'parent': parent_name, 'orgs': {'child_org_name': {...}}
     root = None
     org_map = {}
     for org_name, org_item in rolesdb.get_organization_items().items():
@@ -215,7 +256,8 @@ def get_admin_objects_for_user(email: str):
         else:  # no parent; this is Amplio
             root = org
 
-    # Add programs to their owning organizations.
+    # Add programs to their owning organizations. Adds 'programs' dict to org records (from just above),
+    # as {program_name: {'name': program_name, 'roles': '...', 'org': org_name}, ...}
     orphan_programs = {}
     for prog_name, prog_item in rolesdb.get_program_items().items():
         prog = {'name': prog_name}
@@ -224,6 +266,7 @@ def get_admin_objects_for_user(email: str):
         org_name = prog_item.get(PROGRAMS_ORG_FIELD)
         prog['org'] = org_name
         if org_name in org_map:
+            # Add this program to its organization's list of programs.
             org_map[org_name].setdefault('programs', {})[prog_name] = prog
         else:
             orphan_programs[prog_name] = prog
@@ -277,22 +320,36 @@ def is_email_known(email)-> Tuple[bool, bool]:
     is True if the email address is known, and the second is true if it is known only
     by the domain (ie, nobody@amplio.org is known by @amplio.org)
     """
+    email = _normalize_email(email)
     email_split = email.split('@')
     email_domain = '@' + email_split[1] if len(email_split) == 2 and len(email_split[0]) > 0 else None
 
+    # Does the email address have any role assigned in any organization?
     for org_item in rolesdb.get_organization_items().values():
         roles_str = org_item.get(ORGS_ROLES_FIELD, [])
         if email in roles_str or email_domain in roles_str:
             return True, email not in roles_str
+    # Does the email address have any role assigned in any program?
     for prog_item in rolesdb.get_program_items().values():
         roles_str = prog_item.get(ORGS_ROLES_FIELD, [])
         if email in roles_str or email_domain in roles_str:
             return True, email not in roles_str
+    # Don't know the email address.
     return False, False
 
 
 def get_programs_for_user(email: str) -> Dict[str, str]:
+    """
+    Gets the programs in which the given user has any role, and the user's role in that program.
+
+    Parameters:
+        email: The email address of the user for which the available programs is desired.
+
+    Return:
+        A dict of {programid: rolestr} for the user's roles.
+    """
     programs = {}
+    email = _normalize_email(email)
     email_split = email.split('@')
     email_domain = '@' + email_split[1] if len(email_split) == 2 and len(email_split[0]) > 0 else None
 
@@ -305,7 +362,7 @@ def get_programs_for_user(email: str) -> Dict[str, str]:
             org_roles = get_roles_for_organization(prog[PROGRAMS_ORG_FIELD])
             roles_strs.append(org_roles.get(email))
             roles_strs.append(org_roles.get(email_domain))
-        roles_str = Roles.normalize(*roles_strs)
+        roles_str = _normalize_role_list(*roles_strs)
         if roles_str:
             programs[prog[PROGRAMS_PROGRAM_FIELD]] = roles_str
     return programs
@@ -313,6 +370,21 @@ def get_programs_for_user(email: str) -> Dict[str, str]:
 
 # noinspection PyUnusedLocal
 def update_roles_for_program(program: str, old: Dict[str, str], new: Dict[str, str]):
+    """
+    Update the roles assigned to a program.
+    Parameters:
+        program: the programid for which roles are to be changed.
+        old: a dict of {email: roles} (that should be) currently assigned to the program.
+        new: a dict of {email: roles} to be assigned to the program.
+        
+    For each email address key in new, 
+        if the (normalized) desired role string is empty, 
+            remove that email from the list of roles
+        otherwise
+            set the roles for the email to the given role string.
+    
+    These roles are in addition to any roles assigned at an organizational level.
+    """
     program_item = rolesdb.get_program_items().get(program)
     if program_item is None:
         return
@@ -321,17 +393,39 @@ def update_roles_for_program(program: str, old: Dict[str, str], new: Dict[str, s
     # if people start stepping on each other.
     program_item[PROGRAMS_ROLES_FIELD] = {}
     for email, role_str in new.items():
-        role_str = Roles.normalize(role_str)
+        email = _normalize_email(email)
+        role_str = _normalize_role_list(role_str)
         if role_str:
-            program_item[PROGRAMS_ROLES_FIELD][email.lower()] = role_str
+            if email not in EXCLUDED_EMAIL_DOMAINS:
+                program_item[PROGRAMS_ROLES_FIELD][email] = role_str
         else:
-            del program_item[PROGRAMS_ROLES_FIELD][email.lower()]
+            del program_item[PROGRAMS_ROLES_FIELD][email]
 
     rolesdb.put_program_item(program_item)
 
 
 # noinspection PyUnusedLocal
 def update_roles_for_organization(org: str, old: Dict[str, str], new: Dict[str, str]):
+    """
+    Update the roles assigned to an organization. These roles are inherited by all programs belonging
+    to this organization, and to all programs belonging to any dependent (child) organization.
+    
+    Parameters:
+        org: the name of the organization for which roles are to be changed.
+        old: a dict of {email: roles} (that should be) currently assigned to the organization.
+        new: a dict of {email: roles} to be assigned to the organization.
+
+    For each email address key in new, 
+        if the (normalized) desired role string is empty, 
+            remove that email from the list of roles
+        otherwise
+            set the roles for the email to the given role string.
+
+    Note that assigned roles are additive. Any roles assigned to an organization apply to all
+    programs belonging to that organization or child organization, regardless of what may or may
+    not be assigned to the program. In other words, roles are always "granted", and can not then
+    be "denied" at a finer level.
+    """
     org_item = rolesdb.get_organization_items().get(org)
     if org_item is None:
         return
@@ -340,25 +434,33 @@ def update_roles_for_organization(org: str, old: Dict[str, str], new: Dict[str, 
     # if people start stepping on each other.
     org_item[ORGS_ROLES_FIELD] = {}
     for email, role_str in new.items():
-        role_str = Roles.normalize(role_str)
+        email = _normalize_email(email)
+        role_str = _normalize_role_list(role_str)
         if role_str:
-            org_item[ORGS_ROLES_FIELD][email.lower()] = role_str
+            if email not in EXCLUDED_EMAIL_DOMAINS:
+                org_item[ORGS_ROLES_FIELD][email] = role_str
         else:
-            del org_item[ORGS_ROLES_FIELD][email.lower()]
+            del org_item[ORGS_ROLES_FIELD][email]
 
     rolesdb.put_organization_item(org_item)
 
 
-def get_organizations_and_dependants():
+def get_organizations_and_dependants() -> Dict[str, Dict]:
+    """
+    Return a dict of {organization_name : organization_item}, where organization_item are the rows (objects?) in
+    the organizations DynamoDB table. Add a 'dependent_orgs' member to each organization_item with a list of
+    the names of dependent (child) organizations. (In the table, the linkage goes up, from dependent to parent).
+    """
     # Make a copy because we're going to change it.
     organizations = {x[ORGS_ORGANIZATION_FIELD]: x for x in rolesdb.get_organization_items()}
     for org_name, organization in rolesdb.get_organization_items().items():
         # Ensure that every org record has a 'dependent_orgs', even if it's empty.
         organization.setdefault('dependent_orgs', [])
-        admin_org_name = organization.get(ORGS_PARENT_FIELD)
-        if admin_org_name and admin_org_name in organizations:
-            admin_org = organizations[admin_org_name]
-            dependent_org_list = admin_org.setdefault('dependent_orgs', [])
-            if org_name not in dependent_org_list:
-                dependent_org_list.append(org_name)
+        parent_org_name = organization.get(ORGS_PARENT_FIELD)
+        # If there is a parent org, and we know that parent org, add this org to that parent's list of dependents.
+        if parent_org_name and parent_org_name in organizations:
+            parent_org_item = organizations[parent_org_name]
+            parents_dependent_orgs = parent_org_item.setdefault('dependent_orgs', [])
+            if org_name not in parents_dependent_orgs:
+                parents_dependent_orgs.append(org_name)
     return organizations

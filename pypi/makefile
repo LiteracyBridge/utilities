@@ -1,6 +1,6 @@
 PACKAGE = amplio
 PYTHON = python3.8
-VIRTUAL_ENV = progspec_env
+VIRTUAL_ENV = pypiEnv
 
 # Default commands
 help: helper

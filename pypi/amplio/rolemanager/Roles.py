@@ -21,7 +21,8 @@ def normalize(*args: str) -> str:
     for arg in args:
         if not arg:
             continue
-        roles.update([x.upper() for x in [x.strip() for x in arg.split(',')] if x and x in ROLES])
-
+        # 'AD, pm ,,XX' -> ['AD', 'PM', '', 'XX'] -> ['AD', 'PM']; then add to roles.
+        roles.update([x for x in [x.strip() for x in arg.upper().split(',')] if x and x in ROLES])
+    # Sorts from most-powerful to least-powerful. More importantly, makes all role strings the _same_ order.
     roles_list = sorted(roles, key=lambda x: ROLES.index(x))
     return ','.join(roles_list)

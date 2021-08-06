@@ -167,6 +167,11 @@ def delete_program_record(programid: str) -> bool:
     :param programid: to be deleted
     :return: True if the delete succeeded, False if an exception occurred.
     """
+    if programid == 'TEST':
+        # Special TEST program id.
+        print('NOT deleting special program record for TEST.\nok')
+        return True
+
     print(f'Deleting program record for {programid}')
     if not args.dry_run:
         try:

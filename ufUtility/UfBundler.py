@@ -53,8 +53,8 @@ class UfBundler():
         self._deployment_number = deployment_number
         self._max_files = max_files
         self._max_bytes = max_bytes
-        self._min_uf_duration = min_uf_duration or 5
-        self._max_uf_duration = max_uf_duration or 300
+        self._min_uf_duration = min_uf_duration
+        self._max_uf_duration = max_uf_duration
         self._out_bucket = bucket
         self._dry_run = kwargs.get('dry_run', False)
         self._verbose = kwargs.get('verbose', 0)
@@ -131,8 +131,10 @@ class UfBundler():
 
 
     def _get_uf_records(self, rebundle=False) -> List[UfRecord]:
+        import datetime
+
         def keep(x: UfRecord) -> bool:
-            return (x.bundle_uuid is None or rebundle) \
+            return (x.bundle_uuid is None or x.bundle_uuid == '' or rebundle) \
                    and x.length_seconds >= self._min_uf_duration and x.length_seconds <= self._max_uf_duration
 
         rows: List[UfRecord] = self._db.get_uf_records(programid=self._programid,

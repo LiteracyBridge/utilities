@@ -2,7 +2,7 @@ import json
 import sys
 import time
 import traceback
-from typing import Tuple, List, Union
+from typing import Tuple, List, Union, Dict
 
 import amplio.rolemanager.manager as roles_manager
 from amplio.rolemanager.Roles import *

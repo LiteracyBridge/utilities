@@ -41,6 +41,9 @@ BAD_CHARS_RE = re.compile('[<>:"/\\\\|?*\x01-\x1f]')
 
 
 class SfToAws:
+    """
+    A class to encapsulate adding a record to the dynamodb table 'sf2aws'. Creates the table if needed.
+    """
     def __init__(self, **kwargs):
         """Initialize the instance, open the database, ensure the tables exist."""
         self._dynamodb_client = boto3.client('dynamodb')  # specify amazon service to be used
@@ -116,6 +119,14 @@ class SfToAws:
 s3_client = boto3.client('s3')
 SF_TO_AWS_BUCKET: str = 'amplio-sf-to-aws'
 
+# List the objects with the given prefix.
+# noinspection PyPep8Naming
+def _list_objects(Bucket, Prefix='', **kwargs):
+    paginator = s3_client.get_paginator("list_objects_v2")
+    request_args = {'Bucket': Bucket, 'Prefix': Prefix, **kwargs}
+    for objects in paginator.paginate(**request_args):
+        for obj in objects.get('Contents', []):
+            yield obj
 
 # Format and send an ses message. Options are
 # html    - if true, send as html format
@@ -169,6 +180,12 @@ def send_ses(subject: str,
 
 
 def get_json(key: str, bucket: str = SF_TO_AWS_BUCKET) -> Dict[str, str]:
+    """
+    Reads an object from an S3 bucket and parses it as JSON.
+    @param key: key of the object
+    @param bucket: bucket in which the object lives
+    @return: the json, parsed into a dict.
+    """
     def norm_k(k: str) -> str:
         k = str(k)
         return k.replace(' ', '_').lower()
@@ -205,16 +222,23 @@ def lambda_handler(event, context):
     sf_db = SfToAws()
 
     email_text = []
+    programs = []
 
     records = event['Records']
     for record in records:
+        email_text.append('\n\n============================================================\n\n')
+
         bucket = record['s3']['bucket']
         bucket_name = bucket['name']
         object = record['s3']['object']
         key = urllib.parse.unquote_plus(object['key'], encoding='utf-8')
 
         print('Got event for key "{}" in bucket "{}"'.format(key, bucket_name))
-        sf_data = get_json(key=key, bucket=bucket_name)
+        try:
+            sf_data = get_json(key=key, bucket=bucket_name)
+        except Exception as ex:
+            email_text.append(f'Exception parsing {key}: {ex}')
+            continue
 
         if (check_fields(sf_data, email_text)):
             data = compute_fields(sf_data, is_new=not sf_db.has_record(sf_data))
@@ -224,14 +248,22 @@ def lambda_handler(event, context):
                 email_text.append('{}:"{}"'.format(k, v))
 
             net_data = sf_db.get_record(sf_data)
-            if all([x in net_data for x in ['customer', 'affiliate', 'tech_poc', 'acm']]):
-                email_text.append(
-                    'newAcm --org "{customer}" --parent "{affiliate}" --admin {tech_poc} "{acm}"'.format(**net_data))
+            rec0 = (net_data['programid'], net_data['acm'], net_data['program_name'], net_data['customer'], net_data['affiliate'])
+            rec1 = [x.replace("'", "") for x in rec0]
+            rec2 = ','.join([f"'{x}'" for x in rec0])
+            programs.append(rec2)
+            if all([x in net_data for x in ['customer', 'affiliate', 'program_name', 'acm']]):
+                command = f"newAcm --org '{net_data['customer']}' --parent '{net_data['affiliate']}' --comment '{net_data['program_name']}' '{net_data['acm']}'"
+                if 'tech_poc' in net_data:
+                    command += f" --admin '{net_data['tech_poc']}'"
+                email_text.append(command)
         else:
             email_text.append('Full record:')
             for k, v in sf_data.items():
                 email_text.append('{}:"{}"'.format(k, v))
-            email_text.append(' ')
+
+    for p in programs:
+        print(p)
 
     send_ses(subject='New program records', body='\n'.join(email_text))
 
@@ -258,17 +290,21 @@ def check_fields(sf_data, messages: List[str]) -> bool:
 
 def compute_fields(sf_data, is_new):
     data = {}
-    if is_new:
-        for k, v in sf_data.items():
-            data[k] = v
-        if 'acm' not in sf_data:
-            affiliate_abbr = abbrev(sf_data['affiliate'], preserve=4)
-            prog_abbr = abbrev(sf_data['program_name'], preserve=7)
-            data['acm'] = affiliate_abbr + '-' + prog_abbr
-        if 'sdg' in sf_data:
-            data['sdg'] = parse_sdg(sf_data['sdg'])
-        if 'language' in sf_data:
-            data['language'] = parse_language(sf_data['language'])
+    data['is_new'] = True if is_new else False
+    for k, v in sf_data.items():
+        try:
+            val = int(float(v))
+        except Exception as ex:
+            val = v
+        data[k] = val
+    if 'acm' not in sf_data:
+        affiliate_abbr = abbrev(sf_data['affiliate'], preserve=4)
+        prog_abbr = abbrev(sf_data['program_name'], preserve=7)
+        data['acm'] = affiliate_abbr + '-' + prog_abbr
+    if 'sdg' in sf_data:
+        data['sdg'] = parse_sdg(sf_data['sdg'])
+    if 'language' in sf_data:
+        data['language'] = parse_language(sf_data['language'])
 
     data[_PENDING_PROGRAM_TABLE_KEY] = sf_data['program_id']
     data['verified'] = False
@@ -384,7 +420,19 @@ if __name__ == '__main__':
                                      'object': {'key': 'a1t3l000006t8QCAAY.json', 'size': 1453,
                                                 'eTag': '47aa7471b336f417227849cab868e99f',
                                                 'sequencer': '005F5A780A3AF59216'}}}]}
-        lambda_handler(event, None)
+
+        event2 = {'Records': [{'s3': {'bucket': {'name': 'amplio-sf-to-aws'},
+                                      'object': {'key': 'a1t3l000006tUsoAAE.json'}
+                                      }
+                               }]
+                  }
+
+        sf_records = [x for x in _list_objects(Bucket=SF_TO_AWS_BUCKET, Prefix='')]
+        event2['Records'] = [{'s3':{'bucket':{'name':'amplio-sf-to-aws'},'object':{'key': K['Key']}}} for K in sf_records]
+
+
+        #lambda_handler(event, None)
+        lambda_handler(event2, None)
 
 
     def test_abbrev():

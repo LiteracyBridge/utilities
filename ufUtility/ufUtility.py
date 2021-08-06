@@ -34,12 +34,14 @@ def _do_bundle() -> Tuple[int, int, int, int, int]:
     kwargs = {
         'max_files': args.max_files or 1000,
         'max_bytes': args.max_bytes or 10_000_000,  # 10 MB
-        'min_uf_duration': args.min_duration if 'min_duration' in args else 5,
-        'max_uf_duration': args.max_duration if 'max_duration' in args else 300,
         'bucket': args.bucket or None,
         'dry_run': dry_run,
         'verbose': args.verbose
     }
+    if args.min_duration is not None:
+        kwargs['min_uf_duration'] = args.min_duration
+    if args.max_duration is not None:
+        kwargs['max_uf_duration'] = args.max_duration
     if 'limit' in args:
         kwargs['limit'] = args.limit
     programid = args.program

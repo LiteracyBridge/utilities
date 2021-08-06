@@ -35,6 +35,7 @@ copy_python:
 	if test -d $(VIRTUAL_ENV)/lib64; then cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; fi
 
 remove_unused:
+	../amplio-layer/rm_layer.sh
 	rm -rf ./package/tmp/__pycache__*
 	rm -rf ./package/tmp/wheel*
 	rm -rf ./package/tmp/easy_install*
@@ -72,6 +73,13 @@ zip:
 upload_lambda:
 	aws lambda update-function-code --function-name $(FUNCTION_NAME) --zip-file fileb://./package/$(PROJECT).zip
 	date
+
+# Use either of these to find the latest layer version.
+# aws lambda list-layers --query "Layers[?LayerName=='amplio-layer'].LatestMatchingVersion.LayerVersionArn|[0]"
+# aws lambda list-layer-versions  --layer-name amplio-layer --query 'LayerVersions[0].LayerVersionArn'
+update_layer:
+	aws lambda update-function-configuration --function-name $(FUNCTION_NAME) \
+	--layers $(shell aws lambda list-layers --query "Layers[?LayerName=='amplio-layer'].LatestMatchingVersion.LayerVersionArn|[0]")
 
 create_lambda:
 	aws lambda create-function --function-name $(FUNCTION_NAME) \
