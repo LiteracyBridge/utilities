@@ -58,11 +58,12 @@ uf_column_map = {
 # @formatter:off
 # for any column, provide code to tweak the value as needed.
 uf_column_tweaks_map = {
-    'deployment_timestamp': lambda x: x or '180101',
-    'test_deployment':      lambda x: x or 'f',
-    'collection_timestamp': lambda x: x or '180103',
-    'language':             lambda x: (x or '').lower(),
-    'date_recorded':        lambda x: x or '180102'
+    'deployment_timestamp': lambda x,p: x or '180101',
+    'test_deployment':      lambda x,p: x or 'f',
+    'collection_timestamp': lambda x,p: x or '180103',
+    'language':             lambda x,p: (x or '').lower(),
+    'date_recorded':        lambda x,p: x or '180102',
+    'length_bytes':         lambda x,p: x or str((int(p.get('metadata.SECONDS', 1)))*2000)
 }
 # @formatter:on
 

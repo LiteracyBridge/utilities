@@ -57,7 +57,7 @@ class UfMetadata():
                             val = props[pn]
                             break
                 if column_name in uf_column_tweaks_map:
-                    val = uf_column_tweaks_map[column_name](val)
+                    val = uf_column_tweaks_map[column_name](val, props)
                 columns[column_name] = val
             self._props.append(tuple([columns[k] for k in uf_column_map.keys()]))
 
