@@ -1,4 +1,5 @@
 # import pandas as pd
+import re
 import sys
 import traceback
 
@@ -9,7 +10,8 @@ from . import errors, utils
 from .programspec_constants import GENERAL, CONTENT, DEPLOYMENTS, \
     COMPONENTS, required_sheets, \
     required_columns, required_data, optional_columns, columns_to_members_map, \
-    string_columns, column_names_to_member_names, optional_sheets, default_data, columns_to_rename, columns_to_remove
+    string_columns, embedded_spaces_removed_columns, column_names_to_member_names, \
+    optional_sheets, default_data, columns_to_rename, columns_to_remove
 
 '''
 Interface to Program Specification spreadsheet.
@@ -189,10 +191,13 @@ class Spreadsheet:
 
         # Columns required to be strings.
         string_cells = column_names_to_member_names(string_columns[sheet_type]).values()
+        space_removed_cells = column_names_to_member_names(embedded_spaces_removed_columns[sheet_type]).values()
         def normalize(x, name):
             if x is not None and name in string_cells and not isinstance(x, str):
                 x = str(x)
             if isinstance(x, str):
+                if name in space_removed_cells:
+                    x = re.sub(r'\s', '', x)
                 return x.strip()
             return x
 

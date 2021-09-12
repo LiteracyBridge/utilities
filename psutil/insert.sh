@@ -76,14 +76,11 @@ function importTable() {
         agent char varying,
         latitude double precision,
         longitude double precision,
-        variant char varying
+        variant char varying,
+        group_size integer
     );
     \copy temp_recip from '${recipientsfile}' with delimiter ',' csv header;
     
-    -- Add the required group_size column
-    ALTER TABLE temp_recip ADD COLUMN group_size INTEGER;
-    UPDATE temp_recip SET group_size = 0;
-
     -- Copy from temp_recip into recipients
     INSERT INTO recipients SELECT * FROM temp_recip
         --ON CONFLICT ON CONSTRAINT recipients_uniqueness_key

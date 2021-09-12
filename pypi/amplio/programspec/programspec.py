@@ -454,7 +454,7 @@ class Recipient:
 
     @property
     def id_tuple(self):
-        return (self.community, self.group_name, self.agent)
+        return (self.community, self.group_name, self.agent, self.language_code)
 
     def __getattr__(self, item):
         if item in RECIPIENT_FIELDS:

@@ -34,10 +34,8 @@ class RecipientUtils:
 
     def compute_directory(self, recipient: programspec.Recipient):
         # community{-group}{-community_worker}
-        r = recipient.id_tuple
-        name = r[0]
-        name += ('-' + r[1]) if r[1] else ''
-        name += ('-' + r[2]) if r[2] else ''
+        rt = recipient.id_tuple
+        name = '-'.join([r if r else '' for r in rt])
         return _file_substitutions.sub('_', name)
 
     # Given the directory for some recipient, compute the recipientid.

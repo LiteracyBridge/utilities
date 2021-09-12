@@ -238,13 +238,21 @@ def do_diff(args):
 
 
 def do_validation(args):
+    kwargs = {}
+    if args.fix_recips:
+        kwargs['fix_recips'] = True
     spreadsheet, prog_spec = _validate(args.xlsx)
     mark = errors.get_mark()
-    validator = Validator(prog_spec)
+    validator = Validator(prog_spec, **kwargs)
     validator.validate()
     _print_errors(mark)
     if prog_spec:
         print(prog_spec)
+        if args.fix_recips:
+            if args.out is not None:
+                outpath = new_xlsx_name(args.xlsx, args.outdir, args.out)
+            prog_spec.save_changes(outpath)
+            spreadsheet.save(outpath)
 
 
 def do_reconcilation(args):
@@ -310,7 +318,7 @@ def main():
 
     # create the parser for the "validate" command
     validate_parser = subparsers.add_parser('validate', help='Validation help', description='Validate a spreadsheet.')
-    # validate_parser.add_argument('--fix-recips', '-f', action='store_true', help='Fix missing recipient ids & directory names.')
+    validate_parser.add_argument('--fix-recips', '-f', action='store_true', help='Fix missing recipient ids & directory names.')
     validate_parser.add_argument('xlsx', metavar='XLSX', action=StorePathAction, help='The spreadsheet.')
     validate_parser.set_defaults(func=do_validation)
 

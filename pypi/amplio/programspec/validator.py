@@ -36,6 +36,7 @@ class Validator():
             for recipient in component.recipients:
                 recipientid = recipient.recipientid
                 directory_name = recipient.directory_name
+                lbl = None
 
                 if project_uses_custom_greetings and not directory_name and self._fix_recips:
                     directory_name = self._recipient_utils.compute_directory(recipient)
@@ -46,8 +47,8 @@ class Validator():
                     errors.error(errors.added_directory, args)
 
                 if not recipientid and self._fix_recips:
-                    dir_name = directory_name or self._recipient_utils.compute_directory(recipient)
-                    recipientid = self._recipient_utils.compute_recipientid(dir_name)
+                    recipientid_str = directory_name or self._recipient_utils.compute_directory(recipient)
+                    recipientid = self._recipient_utils.compute_recipientid(recipientid_str)
                     recipient.recipientid = recipientid
                     lbl = lbl or get_label(recipient)
                     args = {'component': component.name, 'label': lbl[0], 'name': lbl[1],

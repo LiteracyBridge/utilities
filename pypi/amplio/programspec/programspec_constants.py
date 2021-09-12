@@ -63,7 +63,7 @@ required_columns = {
 }
 # Only these columns in the given sheet is *required* to have data. Other columns are still required, but can be blank.
 required_data = {
-    CONTENT: [DEPLOYMENT_NO, PLAYLIST_TITLE, MESSAGE_TITLE, KEY_POINTS],
+    CONTENT: [DEPLOYMENT_NO, PLAYLIST_TITLE, MESSAGE_TITLE],
     DEPLOYMENTS: [DEPLOYMENT_NO, START_DATE, END_DATE],
     'recipient': [COUNTRY, COMMUNITY, NUM_TBS, SUPPORT_ENTITY, LISTENING_MODEL, LANGUAGE_CODE]
 }
@@ -82,6 +82,15 @@ string_columns = {
     'recipient': [AFFILIATE, PARTNER, COMPONENT, COUNTRY, REGION, DISTRICT, COMMUNITY, GROUP_NAME, AGENT,
                    SUPPORT_ENTITY, LISTENING_MODEL, LANGUAGE_CODE, RECIPIENTID, DIRECTORY_NAME, VARIANT, TALKINGBOOKID]
 }
+# These columns have embedded spaces removed (if they're a string column)
+embedded_spaces_removed_columns = {
+    GENERAL: [],
+    CONTENT: [LANGUAGE_CODE, VARIANT],
+    DEPLOYMENTS: [],
+    COMPONENTS: [],
+    'recipient': []
+}
+
 
 default_data = {
     COMPONENTS: [{COMPONENT.lower(): 'Recipients'}]
