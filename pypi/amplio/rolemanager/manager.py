@@ -145,7 +145,8 @@ def get_roles_for_program(program: str) -> Dict[str, str]:
 
 def get_roles_for_user_in_program(email: str, program: str) -> str:
     """
-    Returns a string of comma-separated roles assigned to the given user in the given program.
+    Returns a string of comma-separated roles assigned to the given user in the given program, including
+    roles inherited from the organization and any parent organizations.
 
     Parameters:
         email: the email address of the user for whom the roles are desired.
@@ -163,6 +164,15 @@ def get_roles_for_user_in_program(email: str, program: str) -> str:
 
     return _normalize_role_list(user_roles_str, domain_roles_str)
 
+def user_has_role_in_program(email: str, program: str, roles: str = None) -> bool:
+    assigned_roles = get_roles_for_user_in_program(email, program)
+    if roles is None:
+        # does user have any role at all?
+        return len(assigned_roles) > 0
+    # Asking about one or more specific roles: is any role in 'roles' one of the assigned_roles
+    assigned_roles = assigned_roles.split(',')
+    requested_roles = roles.split(',')
+    return any(rr in assigned_roles for rr in requested_roles)
 
 def get_roles_for_user_in_organization(email: str, org: str) -> str:
     email = _normalize_email(email)
