@@ -5,7 +5,7 @@ with open('README.md', 'r') as fh:
 
 setuptools.setup(
     name='amplio',
-    version='0.0.87',
+    version='0.0.88',
     author='Bill Evans',
     author_email='bill@amplio.org',
     description='Amplio Python Library',
