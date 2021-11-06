@@ -85,6 +85,7 @@ def get_db_connection():
     return db_connection
 
 
+# noinspection SqlResolve,SqlNoDataSourceInspection
 def check_for_postgresql_project(program_id) -> bool:
     """
     Checks to see if the project exists in the PostgerSQL projects table.
@@ -105,10 +106,12 @@ def check_for_postgresql_project(program_id) -> bool:
     return True
 
 
+# noinspection SqlResolve,SqlNoDataSourceInspection
 def populate_postgresql(program_id: str, comment: str) -> bool:
     """
     Adds the project's row to the projects table in PostgreSQL
     :param program_id: to be added
+    :param comment: what the customer calls the program
     :return: True if successful, False if not
     """
     print(f"Adding '{program_id}' to PostgreSQL projects table...", end='')
@@ -121,6 +124,31 @@ def populate_postgresql(program_id: str, comment: str) -> bool:
     cur.execute("INSERT INTO projects (id, projectcode, project, active) VALUES  (%s, %s, %s, True);",
                 (new_id, program_id, comment))
     num = cur.rowcount
+
+    # The programs table looks like this:
+    # {
+    #     "listening_models": [],
+    #     "sustainable_development_goals": [],
+    #     "deployments_count": 1,
+    #     "deployments_length": "one_quarter",
+    #     "deployments_first": $(TOMORROW),
+    #     "feedback_frequency": "weekly",
+    #     "projectcode": ${PROGRAMID},
+    #     "languages": [
+    #         "eng"
+    #     ],
+    #     "country": "Afghanistan",
+    #     "region": [],
+    #     "direct_beneficiaries_map": {
+    #         "male": "Number of Male",
+    #         "female": "Number of Female",
+    #         "youth": "Number of Youth"
+    #     },
+    #     "direct_beneficiaries_additional_map": {},
+    #     "affiliate": "",
+    #     "partner": ""
+    # }
+
     connection.commit()
 
     if num == 1:

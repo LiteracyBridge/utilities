@@ -63,12 +63,13 @@ class UfMetadata():
 
     def _process_file(self, path: Path) -> None:
         """
-        Processes one .properties file.
+        Processes one .properties file. Adds the relevant properties to self._props.
         :param path: Path to the file to be read and processed.
         """
         props: Dict[str, str] = {}
         with open(path, 'r') as props_file:
             for prop_line in props_file:
+                # prop_line is like "metadata.MESSAGE_UUID=3dcff318-de4a-56db-9395-5856474f7ce2"
                 parts: List[str] = prop_line.strip().split('=', maxsplit=1)
                 if len(parts) != 2 or parts[0][0] == '#':
                     continue
@@ -77,7 +78,7 @@ class UfMetadata():
 
     def add_from_files(self, files: List[Path] = None, **kwargs) -> Tuple[int, int, int, int, int]:
         """
-        Given a Path to an a18 file, or a directory containing a18 files, process the file(s).
+        Given a Path to an .properties file, or a directory containing .properties files, process the file(s).
         :param files: An optional list of files to process.
         :return: a tuple of the counts of directories and files processed, and the files skipped.
         """

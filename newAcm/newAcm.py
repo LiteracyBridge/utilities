@@ -285,7 +285,7 @@ def new_acm():
     if args.do_program != 'none':
         ok = check_for_program_record(program_id) and ok
     if args.do_organization != 'none':
-        ok = check_for_organization_record(args.organization, args.parent_organization) and ok
+        ok = check_for_organization_record(args.org, args.parent) and ok
 
     if args.do_progspec != 'none':
         ok = check_for_programspec(program_id) and ok
@@ -301,20 +301,20 @@ def new_acm():
         if args.do_content == 'both':
             ok = create_and_populate_content(program_id, acm_dir) and ok
         if args.do_dropbox == 'both':
-            ok = create_and_share_dbx(program_id, args.admin, args.comment) and ok
+            ok = create_and_share_dbx(program_id, args.admin, args.name) and ok
 
         if args.do_checkout == 'both':
             ok = create_checkout_record(acm_dir) and ok
         if args.do_program == 'both':
-            ok = create_program_record(program_id, args.organization, args.admin, args.s3, args.comment)
+            ok = create_program_record(program_id, args.org, args.admin, args.s3, args.name)
 
         if args.do_organization == 'both':
-            ok = create_organization_record(args.organization, args.parent_organization)
+            ok = create_organization_record(args.org, args.parent)
 
         if args.do_progspec == 'both':
             ok = initialize_programspec(program_id, args.s3) and ok
         if args.do_sql == 'both':
-            ok = populate_postgresql(program_id, args.comment) and ok
+            ok = populate_postgresql(program_id, args.name) and ok
 
         if args.do_dashboard == 'both':
             ok = populate_project_list(program_id) and ok
@@ -355,11 +355,9 @@ def main():
                             help='Dropbox directory (default is ~/Dropbox).')
     arg_parser.add_argument('acm', metavar='ACM', help='The new ACM name')
     arg_parser.add_argument('--s3', action='store_true', help='The program\'s content storage is in S3, not Drobpox.')
-    arg_parser.add_argument('--comment', required=True, help='Program comment.')
-    arg_parser.add_argument('--organization', '--org', help='The program\'s organization.')
-    arg_parser.add_argument('--parent-organization', '--parent_org', '--parent',
-                            help='The program\'s organization\'s parent.',
-                            default='Amplio')
+    arg_parser.add_argument('--name', required=True, help='what the customer calls the program.')
+    arg_parser.add_argument('--org', '--customer', metavar='customer', help='The customer running or sponsoring the program.')
+    arg_parser.add_argument('--parent', '--affiliate', help='The program\'s organization\'s parent.', default='Amplio')
     arg_parser.add_argument('--admin', help='Email address of the program administrator.')
     arg_parser.add_argument('--dry-run', '--dryrun', '-n', action='store_true', help='Don\'t update anything.')
 
@@ -380,8 +378,6 @@ def main():
     arg_parser.add_argument('--do-organization', choices=['none', 'check', 'both'], default='both',
                             help='Do or don\'t check or create an organization record.')
 
-    arg_parser.add_argument('--feedback', action='store_true', help='Create an ACM suitable for User Feedback.')
-
     arg_parser.add_argument('--db-host', default=None, metavar='HOST',
                             help='Optional host name, default from secrets store.')
     arg_parser.add_argument('--db-port', default=None, metavar='PORT',
@@ -401,11 +397,6 @@ def main():
     set_dropbox_directory(dropbox_directory)
 
     _initialize_postgres()
-
-    if args.feedback:
-        args.no_sql = True
-        args.no_dashboard = True
-        args.no_progspec = True
 
     if not args.s3 or args.do_dropbox != 'none':
         initialize_dbx()
