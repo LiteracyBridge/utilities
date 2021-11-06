@@ -482,10 +482,9 @@ class V1Handler:
                 return self.make_return(STATUS_OK)
 
         update_expr = 'SET acm_state = :s ' + build_remove_now_out(self._checkout_record)
-        condition_expr = 'now_out_key = :k and acm_state = :o'  # revoke check-out should always execute
+        condition_expr = 'acm_state = :o'  # revoke check-out should always execute
         expr_values = {
             ':s': CHECKED_IN,
-            ':k': self._key,
             ':o': CHECKED_OUT
         }
 
