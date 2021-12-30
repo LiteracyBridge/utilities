@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional
+from typing import Optional, List
 
 import boto3
 from amplio.utils.AmplioLambda import *
@@ -18,7 +18,7 @@ STATUS_OK = 'ok'
 STATUS_FAILURE = 'failure'
 
 OK_RESPONSE = 200
-FAILURE_RESPONSE = 400
+FAILURE_RESPONSE_400 = 400
 
 PENDING_PROGSPEC_KEY = 'pending_progspec.xlsx'
 PUBLISHED_PROGSPEC_KEY = 'pub_progspec.xlsx'
@@ -128,15 +128,16 @@ def _get_s3_params_and_obj_info(key: str) -> (object, object):
     return params, obj_info
 
 
-def _open_program_spec_from_s3(programid: str, name: str = None, key: str = None) -> XlsImporter.Importer:
+def _open_program_spec_from_s3(programid: str, name: str = None, key: str = None) -> Tuple[
+    bool, List[str], XlsImporter.Importer]:
     if (name is None) == (key is None):
         raise Exception('Exactly one of "key" and "name" must be provided')
     importer: XlsImporter.Importer = XlsImporter.Importer(program_id=programid)
     key = key if key is not None else _program_key(programid, name)
     obj = s3.get_object(Bucket=PROGSPEC_BUCKET, Key=key)
     obj_data = obj.get('Body').read()
-    importer.do_open(data=obj_data)
-    return importer
+    ok, errors = importer.do_open(data=obj_data)
+    return ok, errors, importer
 
 
 # noinspection PyUnusedLocal
@@ -207,10 +208,12 @@ def echo_handler(event, context):
     }
 
 
-@handler(roles='AD,PM')
-def upload_handler(data: BinBody, programid: QueryStringParam, email: Claim,
+# @handler(roles='AD,PM')
+@NeedsRole('AD,PM')
+def upload_handler(data: BinBody, programid: QueryStringParam, email: Claim, return_diff: QueryStringParam = False,
                    comment: QueryStringParam = 'No comment provided'):
-    print(f'Upload {len(data)} bytes in program {programid} for {email}')
+    return_diff = _bool_arg(return_diff)
+    print(f'Upload {len(data)} bytes in program {programid} for {email}. Return diff: {return_diff}')
     # Check that it's a valid program spec.
     importer = XlsImporter.Importer(programid)
     ok, errors = importer.do_open(data=data)
@@ -223,41 +226,60 @@ def upload_handler(data: BinBody, programid: QueryStringParam, email: Claim,
         key = _program_key(programid, PENDING_PROGSPEC_KEY)
         put_result = s3.put_object(Body=data, Bucket=PROGSPEC_BUCKET, Metadata=metadata, Key=key)
         _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
-        return {'status': STATUS_OK}
-
+        result = {'status': STATUS_OK}
+        if return_diff:
+            diff_result = compare_handler(programid, 'published', 'pending')
+            if diff_result.get('status') == STATUS_OK:
+                result['diff'] = diff_result.get('diff')
+            else:
+                result['status'] = diff_result.get('status')
+        return result
     else:
-        return {'status': STATUS_FAILURE, 'output': errors}, FAILURE_RESPONSE
+        return {'status': STATUS_FAILURE, 'errors': errors}, FAILURE_RESPONSE_400
 
 
-@handler()
+# @handler()
 def compare_handler(programid: QueryStringParam, v1: QueryStringParam, v2: QueryStringParam):
-    def get_pending() -> Spec.Program:
+    def get_pending() -> Tuple[bool, List[str], Spec.Program]:
         # Get the pending program spec
-        return _open_program_spec_from_s3(programid=programid, name=PENDING_PROGSPEC_KEY).program_spec
+        ok, errors, importer = _open_program_spec_from_s3(programid=programid, name=PENDING_PROGSPEC_KEY)
+        try:
+            ps = importer.program_spec
+        except Exception as ex:
+            ps = None
+        return ok, errors, ps
 
-    def get_published() -> Spec.Program:
+    def get_published() -> Tuple[bool, List[str], Spec.Program]:
         # Get the published program spec
-        return _open_program_spec_from_s3(programid=programid, name=PUBLISHED_PROGSPEC_KEY).program_spec
+        ok, errors, importer = _open_program_spec_from_s3(programid=programid, name=PUBLISHED_PROGSPEC_KEY)
+        try:
+            ps = importer.program_spec
+        except Exception as ex:
+            ps = None
+        return ok, errors, ps
 
     def get_unpublished() -> Spec.Program:
         # Get the db-staged program spec.
         engine: Engine = db.get_db_engine()
         exporter: XlsExporter.Exporter = XlsExporter.Exporter(program_id=programid, engine=engine)
-        staged: Spec.Program = exporter.do_open()
-        return staged
+        unpublished_spec: Spec.Program = exporter.do_open()
+        return unpublished_spec
 
     if v1 == 'published':
-        ps1 = get_published()
+        ok1, errors1, ps1 = get_published()
     elif v1 == 'unpublished':
         ps1 = get_unpublished()
+        ok1 = True
     else:
-        ps1 = get_pending()
+        ok1, errors1, ps1 = get_pending()
+
     if v2 == 'published':
-        ps2 = get_published()
+        ok2, errors2, ps2 = get_published()
     elif v2 == 'unpublished':
         ps2 = get_unpublished()
+        ok2 = True
     else:
-        ps2 = get_pending()
+        ok2, errors2, ps2 = get_pending()
 
     comparator = SpecCompare.SpecCompare(ps1, ps2)
     diffs = comparator.diff()
@@ -265,18 +287,32 @@ def compare_handler(programid: QueryStringParam, v1: QueryStringParam, v2: Query
     return {'status': 'ok', 'diff': diffs}
 
 
-@handler(roles='AD,PM')
-def accept_handler(programid: QueryStringParam, email: Claim):
-    print(f'Accept pending program spec for program {programid} by {email}')
+# @handler(roles='AD,PM')
+@NeedsRole('AD,PM')
+def accept_handler(programid: QueryStringParam, email: Claim, comment: QueryStringParam = 'No comment provided',
+                   publish: QueryStringParam = False):
+    original_publish = publish
+    publish = _bool_arg(publish)
+    print(f'Accept pending program spec for program {programid} by {email}. Publish: {publish} (orig: {original_publish}).')
     pending_key = _program_key(programid, PENDING_PROGSPEC_KEY)
-    importer: XlsImporter.Importer = _open_program_spec_from_s3(programid=programid, key=pending_key)
+    ok, errors, importer = _open_program_spec_from_s3(programid=programid, key=pending_key)
     engine: Engine = db.get_db_engine()
     importer.update_database(engine=engine, commit=True)
-    _delete_versions(pending_key)
-    return {'status': 'ok'}
+
+    result = {'status': STATUS_OK}
+    if publish:
+        publish_result, publish_rc = publish_handler(programid, email, comment)
+        if publish_result.get('status') != STATUS_OK:
+            result['status'] = STATUS_FAILURE
+            result['errors'] = publish_result.get('errors')
+
+    if result.get('status') == STATUS_OK:
+        _delete_versions(pending_key)
+    return result
 
 
-@handler(roles='AD,PM')
+# @handler(roles='AD,PM')
+@NeedsRole('AD,PM')
 def publish_handler(programid: QueryStringParam, email: Claim, comment: QueryStringParam = 'No comment provided'):
     """
     Publish the program specification from the database. Creates pub_general.csv, pub_deployments.csv,
@@ -298,10 +334,17 @@ def publish_handler(programid: QueryStringParam, email: Claim, comment: QueryStr
     exporter: XlsExporter.Exporter = XlsExporter.Exporter(program_id=programid, engine=engine)
     ok, errors = exporter.do_export(bucket=PROGSPEC_BUCKET, metadata=metadata)
     print(f'Publish result: {ok}, {errors}')
-    return errors, (200 if ok else 400)
+    if ok:
+        result = {'status': STATUS_OK}
+        response_code = OK_RESPONSE
+    else:
+        result = {'status': STATUS_FAILURE, 'errors': errors}
+        response_code = FAILURE_RESPONSE_400
+    return result, response_code
 
 
-@handler(roles='AD,PM,CO')
+# @handler(roles='AD,PM,CO')
+@NeedsRole('AD,PM,CO')
 def download_handler(programid: QueryStringParam, artifact: QueryStringParam, aslink: QueryStringParam, email: Claim):
     aslink = _bool_arg(aslink)
     artifact = artifact.lower()
@@ -323,7 +366,7 @@ def download_handler(programid: QueryStringParam, artifact: QueryStringParam, as
             params['ResponseContentDisposition'] = f'filename="{programid}-{artifact_map[artifact]}"'
             obj_info['filename'] = f'{programid}-{artifact_map[artifact]}'
             signed_url = s3.generate_presigned_url('get_object', Params=params, ExpiresIn=600)
-            result = {'url': signed_url, 'status': 'ok', 'object': obj_info}
+            result = {'status': STATUS_OK, 'url': signed_url, 'object': obj_info}
         else:
             obj = s3.get_object(**params)
             if artifact in BINARY_ARTIFACTS:
@@ -336,15 +379,17 @@ def download_handler(programid: QueryStringParam, artifact: QueryStringParam, as
         return result
 
 
-@handler(roles='AD,PM,CO,FO')
+# @handler(roles='AD,PM,CO,FO')
+@NeedsRole('AD,PM,CO,FO')
 def list_objects(programid: QueryStringParam):
     """
     Lists the objects in the program's directory in the amplio-progspecs bucket.
     :param programid: Program for which objects are desired.
     :return: A list of the objects and metadata about them.
     """
+    print(f'Listing objects for program {programid}')
     prefix = _program_key(programid)
-    result = {'status': 'ok', 'objects': {}}
+    result = {'status': STATUS_OK, 'objects': {}}
     for obj in _list_objects(Prefix=prefix):
         fn = obj.get('Key')[len(prefix):]
         details = {'Key': obj.get('Key'),
@@ -359,7 +404,7 @@ def list_objects(programid: QueryStringParam):
     return result
 
 
-@handler()
+# @handler()
 def validation_handler(data: BinBody, programid: QueryStringParam, email: Claim):
     print(f'Validate program spec for {programid}, user {email}.')
     # Check that it's a valid program spec.
@@ -370,21 +415,36 @@ def validation_handler(data: BinBody, programid: QueryStringParam, email: Claim)
     return {'status': 'ok', 'output': issues}
 
 
-@router()
-def lambda_router(event, context, action: str = path_param(0)):
-    if action == 'upload':
-        return upload_handler(event, context)
-    elif action == 'review' or action == 'compare':
-        return compare_handler(event, context)
-    elif action == 'accept':
-        return accept_handler(event, context)
-    elif action == 'publish':
-        return publish_handler(event, context)
-    elif action == 'download':
-        return download_handler(event, context)
-    elif action == 'list':
-        return list_objects(event, context)
-    elif action == 'validate':
-        return validation_handler(event, context)
-    elif action == 'echo':
-        return echo_handler(event, context)
+PROGSPEC_HANDLERS = {'upload': upload_handler,
+                     'compare': compare_handler,
+                     'accept': accept_handler,
+                     'publish': publish_handler,
+                     'download': download_handler,
+                     'list': list_objects,
+                     'validate': validation_handler,
+                     'echo': echo_handler
+                     }
+
+
+def lambda_router(event, context):
+    the_router = LambdaRouter(event, context, handlers=PROGSPEC_HANDLERS)
+    action = the_router.pathParam(0)
+    return the_router.dispatch(action)
+
+# def lambda_router(event, context, action: str = path_param(0)):
+#     if action == 'upload':
+#         return upload_handler(event, context)
+#     elif action == 'review' or action == 'compare':
+#         return compare_handler(event, context)
+#     elif action == 'accept':
+#         return accept_handler(event, context)
+#     elif action == 'publish':
+#         return publish_handler(event, context)
+#     elif action == 'download':
+#         return download_handler(event, context)
+#     elif action == 'list':
+#         return list_objects(event, context)
+#     elif action == 'validate':
+#         return validation_handler(event, context)
+#     elif action == 'echo':
+#         return echo_handler(event, context)

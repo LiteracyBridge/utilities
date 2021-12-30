@@ -13,6 +13,7 @@ from Spec import content_sql_2_csv, recipient_sql_2_csv, deployment_sql_2_csv
 PUBLISHED_PREFIX: str = 'pub_'
 UNPUBLISHED_PREFIX: str = 'unpub_'
 
+CSV_ARTIFACTS = ['general', 'deployments', 'content', 'recipients']
 
 class Exporter:
     def __init__(self, program_id: str, engine: Engine):
@@ -148,7 +149,7 @@ class Exporter:
                         f"Couldn't publish '{names['published']}' for {self.program_id} to s3 in bucket '{bucket}': {traceback.format_exc()}.")
 
         # Publish the individual csv files
-        for artifact in artifacts:
+        for artifact in [a for a in artifacts if a in CSV_ARTIFACTS]:
             publish_csv(artifact)
 
         return len(errors) == 0, errors

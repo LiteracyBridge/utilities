@@ -76,14 +76,14 @@ class Recipient:
     communityname: str = ''
     groupname: str = ''
     agent: str = ''
-    variant: str = None
+    variant: str = ''
     listening_model: str = ''
     group_size: int = 0
     numhouseholds: int = 0
     numtbs: int = 0
     agent_gender: str = None
     direct_beneficiaries: int = None
-    direct_beneficiaries_additional: str = None
+    direct_beneficiaries_additional: str = '{}'
     indirect_beneficiaries: int = None
     deployments: str = None
     recipientid: str = None

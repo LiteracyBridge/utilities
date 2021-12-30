@@ -16,9 +16,40 @@ engine: Optional[Engine] = None
 cursor = None
 
 args: Optional[argparse.Namespace] = None
+# @formatter:off
+NON_PROGRAMS = ['ARM-DEMO', 'CARE-ETH']
 
+# programs:
+PROGRAMS_TABLE_NO_SPEC = ['CARE-ETH-BIRHAN', 'ILC-MW-R2R', 'LANDESA-LR-LVG', 'SSA-ETH', 'UNICEF-KE-BIO', 'VSO-TALK-III']
+
+# specs:
+SPEC_NO_PROGRAMS_TABLE = ['BUSARA', 'CARE-BGD-JANO', 'CARE-ETH', 'CARE-ETH-BOYS', 'CARE-ETH-GIRLS',
+    'CARE-GH-COCOA', 'CARE-HTI', 'CBCC-ANZ', 'CBCC-AT', 'CBCC-ATAY', 'CBCC-RTI', 'ITU-NIGER', 'LANDESA-LR',
+    'LBG-APME_2A', 'LBG-COVID19', 'LBG-ESOKO', 'NANDOM-NAP-GH', 'TS-NG-BWC', 'UNFM', 'UNICEF-2', 'UNICEF-ETH-P1',
+    'UNICEF-GH-CHPS', 'UNICEFGHDF-MAHAMA', 'WKW-TLE'
+]
+
+# both:
+PROGRAMS_TABLE_AND_SPEC = ['MC-NGA', 'UNICEF-CHPS']  # , 'VSO-TALK']
+
+# tests:
+TEST_PROGRAMS = ['AMPLIO-ED', 'DEMO', 'DEMO-DL', 'INSTEDD', 'LBG-DEMO', 'SANDBOX', 'TEST', 'TPORTAL', 'XTEST',
+    'XTEST-2', 'XTEST-BB-1', 'XTEST-BB-2', 'XTEST-BB-3', 'XTEST-BB-4', 'XTEST-BB-5', 'XTEST-S3']
+
+PROJECTS_TABLE = ['AMPLIO-ED', 'ARM-DEMO', 'BUSARA', 'CARE', 'CARE-BGD-JANO', 'CARE-ETH', 'CARE-ETH-BIRHAN',
+    'CARE-ETH-BOYS', 'CARE-ETH-GIRLS', 'CARE-GH-COCOA', 'CARE-HTI', 'CBCC', 'CBCC-ANZ', 'CBCC-AT', 'CBCC-ATAY',
+    'CBCC-RTI', 'DEMO', 'DEMO-DL', 'ILC-MW-R2R', 'INSTEDD', 'ITU-NIGER', 'LANDESA-LR', 'LANDESA-LR-LVG', 'LBG-APME_2A',
+    'LBG-COVID19', 'LBG-DEMO', 'LBG-ESOKO', 'LBG-FL', 'MC-NGA', 'MEDA', 'NANDOM-NAP-GH', 'SANDBOX', 'SSA-ETH', 'TEST',
+    'TEST-TS-NG', 'TPORTAL', 'TS-NG-BWC', 'TUDRIDEP', 'UNFM', 'UNICEF-2', 'UNICEF-CHPS', 'UNICEF-ETH-P1',
+    'UNICEF-GH-CHPS', 'UNICEFGHDF-MAHAMA', 'UNICEF-KE-BIO', 'Unknown', 'UWR', 'VSO-TALK', 'VSO-TALK-III', 'WKW-TLE',
+    'XTEST', 'XTEST-2', 'XTEST-BB-1', 'XTEST-BB-2', 'XTEST-BB-3', 'XTEST-BB-4', 'XTEST-BB-5', 'XTEST-S3'
+]
+
+PROGSPEC_BUCKET = 'amplio-progspecs'
+# @formatter:on
 
 # noinspection SqlDialectInspection,SqlNoDataSourceInspection
+
 
 # Given a project or acm name, return the acm directory name.
 def cannonical_acm_dir_name(project: str, is_dbx: bool = True) -> str:
@@ -30,6 +61,20 @@ def cannonical_acm_dir_name(project: str, is_dbx: bool = True) -> str:
         # There is an 'ACM-' prefix, but there shouldn't be.
         acmdir = acmdir[4:]
     return acmdir
+
+
+def read_spec_from_s3(programid: str) -> Optional[bytes]:
+    key = f'{programid}/program_spec.xlsx'
+    from botocore.client import BaseClient
+    import boto3
+    s3: Optional[BaseClient] = boto3.client('s3')
+    try:
+        obj = s3.get_object(Bucket=PROGSPEC_BUCKET, Key=key)
+        obj_data = obj.get('Body').read()
+        return obj_data
+    except Exception as ex:
+        pass
+    return None
 
 
 def _get_path(program: str, file: str) -> Path:
@@ -64,7 +109,8 @@ class StorePathAction(argparse.Action):
     An argparse.Action to store a Path object. A leading ~ is expanded to the user's home directory.
     """
 
-    def _expand(self, v: str) -> Optional[str]:
+    @staticmethod
+    def _expand(v: str) -> Optional[str]:
         """
         Does the work of expanding.
         :param v: A string, possibly with a leading ~ to be expanded ot user's home directory.
@@ -79,6 +125,110 @@ class StorePathAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         values = [self._expand(v) for v in values] if isinstance(values, list) else self._expand(values)
         setattr(namespace, self.dest, values)
+
+
+def look_for_program_spec(programid: str) -> bytes:
+    path = Path(args.dropbox, cannonical_acm_dir_name(programid, is_dbx=True), 'programspec', 'program_spec.xlsx')
+    data = None
+    if path.exists():
+        with path.open('rb') as input_file:
+            data = input_file.read()
+    if data is None or len(data) == 0:
+        path = Path(args.amplio, cannonical_acm_dir_name(programid, is_dbx=False), 'programspec', 'program_spec.xlsx')
+        if path.exists():
+            with path.open('rb') as input_file:
+                data = input_file.read()
+    if data is None or len(data) == 0:
+        data = read_spec_from_s3(programid)
+    return data
+
+
+def _do_trial_publish(targets: List[str], path: Path = None, bucket: str = None) -> None:
+    for programid in targets:
+        output_path = Path(path, programid)
+        if not output_path.exists():
+            output_path.mkdir(exist_ok=True, parents=True)
+        print(f'Processing {programid} for export')
+        exporter = XlsExporter.Exporter(programid, engine)
+        ok, errors = exporter.do_export(output_path=output_path, bucket=bucket)
+        if not ok:
+            for e in errors:
+                print(e)
+
+
+def _do_trial_import(targets: List[str], commit: bool = False) -> None:
+    for programid in targets:
+        print(f'Processing {programid} for import')
+        data = look_for_program_spec(programid)
+        importer = XlsImporter.Importer(programid)
+        ok, errors = importer.do_import('all', data=data, engine=engine, commit=commit)
+        if not ok:
+            print(*errors, sep='\n')
+
+
+def do_programs_table_no_spec():
+    # programs
+    global args
+    commit = args.disposition == 'commit'
+    targets = [x for x in PROGRAMS_TABLE_NO_SPEC if len(args.programs) == 0 or x in args.programs]
+    # _do_trial_import(targets, commit=commit)
+    _do_trial_publish(targets, path=args.directory, bucket=PROGSPEC_BUCKET)
+
+
+def do_spec_no_programs_table():
+    # specs
+    global args
+    commit = args.disposition == 'commit'
+    targets = [x for x in SPEC_NO_PROGRAMS_TABLE if len(args.programs) == 0 or x in args.programs]
+    # _do_trial_import(targets, commit=commit)
+    _do_trial_publish(targets, path=args.directory, bucket=PROGSPEC_BUCKET)
+
+
+def do_programs_table_and_spec():
+    # both
+    global args
+    commit = args.disposition == 'commit'
+    targets = [x for x in PROGRAMS_TABLE_AND_SPEC if len(args.programs) == 0 or x in args.programs]
+    # _do_trial_import(targets, commit=commit)
+    _do_trial_publish(targets, path=args.directory, bucket=PROGSPEC_BUCKET)
+
+
+def do_test_programs():
+    # tests
+    global args
+    commit = args.disposition == 'commit'
+    targets = [x for x in TEST_PROGRAMS if len(args.programs) == 0 or x in args.programs]
+    _do_trial_import(targets, commit=commit)
+    _do_trial_publish(targets, path=args.directory, bucket=PROGSPEC_BUCKET)
+
+
+def just_go_for_it():
+    # go-for-it
+    print('Programs in programs table without spec in S3')
+    do_programs_table_no_spec()
+    print('\nPrograms with spec in S3, but no programs table entry')
+    do_spec_no_programs_table()
+    print('\nPrograms with spec in S3 and programs table entry')
+    do_programs_table_and_spec()
+    print('\nTest programs')
+    do_test_programs()
+
+
+def do_group():
+    global args
+    which = args.group
+    if which == 'programs':
+        do_programs_table_no_spec()
+    elif which == 'specs':
+        do_spec_no_programs_table()
+    elif which == 'both':
+        do_programs_table_and_spec()
+    elif which == 'tests':
+        do_test_programs()
+    elif which == 'go-for-it':
+        just_go_for_it()
+    else:
+        raise Exception('Unexpected value for group')
 
 
 def do_export(programs: List[str]) -> None:
@@ -103,16 +253,18 @@ def do_import(programs: List[str], what: Any, commit: bool = True) -> None:
     global engine, args
     for program in programs:
         print(f'Importing program spec for {program}.')
-        if 'file' in args:
+        if args.file:
             path = args.file
         else:
             path: Path = _get_path(program, 'program_spec.xlsx')
         importer = XlsImporter.Importer(program)
 
         with path.open('rb') as input_file:
-            bytes = input_file.read()
+            data = input_file.read()
 
-        importer.do_import(what, data=bytes, engine=engine, commit=commit)
+        ok, errors = importer.do_import(what, data=data, engine=engine, commit=commit)
+        if not ok:
+            print(*errors, sep='\n')
 
 
 def do_compare(comparees):
@@ -162,9 +314,12 @@ def main():
     arg_parser.add_argument('--import', dest='imports', nargs='?', default=None, const='all',
                             choices=['all', 'deployments', 'content', 'recipients'],
                             help='Import from CSV to SQL.')
-    arg_parser.add_argument('--disposition', choices=['abort', 'commit'], default='commit',
+    arg_parser.add_argument('--disposition', choices=['abort', 'commit'], default='abort',
                             help='Database disposition for the import operation.')
     arg_parser.add_argument('--export', dest='exports', action='store_true', help='Export from SQL to CSV.')
+
+    arg_parser.add_argument('--group', choices=['programs', 'specs', 'both', 'tests', 'go-for-it'],
+                            help='Process one of the pre-defined groups of programs')
 
     arg_parser.add_argument('--compare', dest='comparees', action=StorePathAction, nargs=2)
     arg_parser.add_argument('--directory', action=StorePathAction, default='.', help='Directory for CSV files.')
@@ -180,13 +335,13 @@ def main():
     arg_parser.add_argument('--db-name', default='dashboard', metavar='DB',
                             help='Optional database name, default "dashboard".')
 
-    arg_parser.add_argument('programs', nargs='+', help='Program(s) to import and/or export.')
+    arg_parser.add_argument('programs', nargs='*', help='Program(s) to import and/or export.')
 
     arglist = None
     ######################################################
     #
     #
-    arglist = sys.argv[1:] + ['--db-host', 'localhost']
+    # arglist = sys.argv[1:] + ['--db-host', 'localhost']
     #
     #
     ######################################################
@@ -194,9 +349,10 @@ def main():
     args = arg_parser.parse_args(arglist)
 
     _init()
-    global engine
 
-    if args.exports:
+    if args.group:
+        do_group()
+    elif args.exports:
         do_export(args.programs)
     elif args.imports:
         do_import(args.programs, args.imports, args.disposition == 'commit')

@@ -16,17 +16,21 @@ Diff = namedtuple("Diff", "sql csv")
 
 
 def _rows_differ(db_row, csv_row, *, required_columns: List[str], deprecated_columns: List[str], diffs) -> bool:
+    db_row = db_row if isinstance(db_row, dict) else dataclasses.asdict(db_row)
+    csv_row = csv_row if isinstance(csv_row, dict) else dataclasses.asdict(csv_row)
     if db_row != csv_row:
         # There is a difference. Do we care about it?
-        db_row = dataclasses.asdict(db_row)
-        csv_row = dataclasses.asdict(csv_row)
-        delta = {k: Diff(v, csv_row[k]) for k, v in db_row.items() if v != csv_row[k] and k not in deprecated_columns}
-        for k, v in delta.items():
-            if k not in required_columns and not v.sql and not v.csv:
-                pass
-            else:
-                diffs.append(delta)
-                return True
+        diff_members = [k for k, v in db_row.items() if k not in deprecated_columns and k in csv_row and v != csv_row[k]]
+        # Are they really different?
+        diff_members = [k for k in diff_members if str(db_row[k]) != str(csv_row[k])]
+        if len(diff_members) > 0:
+            delta = {k: Diff(db_row[k], csv_row[k]) for k in diff_members}
+            for k, v in delta.items():
+                if k not in required_columns and not v.sql and not v.csv:
+                    pass
+                else:
+                    diffs.append(delta)
+                    return True
     return False
 
 
@@ -99,7 +103,7 @@ class ImportProcessor:
 
     def _merge_recipients(self):
         def differ(db_row, csv_recip: Recipient) -> bool:
-            return _rows_differ(self._program.make_recipient(dict(db_row)), csv_recip,
+            return _rows_differ(dict(db_row), csv_recip,
                                 required_columns=Spec.recipient_required_fields, deprecated_columns=deprecated_columns,
                                 diffs=diffs)
 
@@ -132,6 +136,9 @@ class ImportProcessor:
             if row_id in csv_recips:
                 if differ(db_row, csv_recips[row_id]):
                     updates.append({'project': self.program_id, **dataclasses.asdict(csv_recips[row_id])})
+        # To give visibility into what's being changed.
+        for d in diffs:
+            print(d)
 
         # Add the new recipients
         field_names = [x.name for x in dataclasses.fields(Recipient)]
@@ -277,7 +284,8 @@ class ImportProcessor:
         values = {'program_id': self.program_id}
         result = self._connection.execute(command, values)
         content = [x for x in result]
-        print(f'{len(content)} messages before save')
+        num_messages = len(content)
+        print(f'{len(content)} messages before save for {self.program_id}.')
 
         # split the "Content" into Playlists and Messages. Delete all the playlists & messages, and re-add them.
         self._db_deployments = Spec.flat_content_to_hierarchy(self._program.content,
@@ -297,4 +305,6 @@ class ImportProcessor:
         values = {'program_id': self.program_id}
         result = self._connection.execute(command, values)
         content = [x for x in result]
-        print(f'{len(content)} messages after save')
+        if num_messages > len(content):
+            print(f'*************\n{self.program_id}: {num_messages-len(content)} fewer message(s) after import!')
+        print(f'{len(content)} messages after save for {self.program_id} (was {num_messages}).')
