@@ -4,25 +4,14 @@ from datetime import datetime
 from typing import List, Dict, Iterable, Tuple
 
 import boto3
-from amplio.rolemanager import manager
 
 REGION_NAME = 'us-west-2'
-
 USERS_TABLE_NAME = 'acm_users'
 PROGRAMS_TABLE_NAME = 'programs'
-dynamodb = boto3.resource('dynamodb', region_name=REGION_NAME)
-users_table = dynamodb.Table(USERS_TABLE_NAME)
-programs_table = dynamodb.Table(PROGRAMS_TABLE_NAME)
 
 USER_POOL_ID = 'us-west-2_3evpQGyi5'
-cognito_client = boto3.client('cognito-idp')
+cognito_client = None
 
-DEFAULT_REPOSITORY = 'dbx'
-
-manager.open_tables()
-
-WARNING_DATE = None
-OLD_POOL_ID = 'us-west-2_6EKGzq75p'
 
 
 def _email_from_event(event: dict) -> str:
@@ -41,87 +30,75 @@ def _email_from_event(event: dict) -> str:
     return email
 
 
-def get_configured_repositories(programs: Iterable[str], default: str = DEFAULT_REPOSITORY, repositories=None) -> Dict[
-    str, List[str]]:
+# noinspection PyPep8Naming
+def was_email_already_confirmed_to_user(email: str, UserPoolId: str = USER_POOL_ID) -> tuple:
     """
-    Given a list of programs, find the ones that do not use the default repository.
-    :param programs: a list of the programs of interest.
-    :param default: the default repository. Programs configured with this repository are not included in the result.
-    :param repositories: a list of repositories of interest. Default is ['s3'].
-    :return: a dict of {repository:[program,...]}
+    Look up an email address to see if it belongs to a confirmed user. If so, also return
+    the username.
     """
-    if repositories is None:
-        repositories = ['s3']
-    default = default.lower()
-    if default != 'dbx':
-        print('Warning! get_configured_repositories called with non-standard default repository: {}'.format(default))
-    result = {}
-    program_items = programs_table.scan()['Items']
-    for item in program_items:
-        program = item.get('program')
-        repository = item.get('repository', default).lower()
-        if program in programs and repository in repositories:
-            list = result.setdefault(repository, [])
-            list.append(program)
-    return result
+    global cognito_client
+    if cognito_client is None:
+        cognito_client = boto3.client('cognito-idp')
+    response = cognito_client.list_users(
+        UserPoolId=UserPoolId,
+        AttributesToGet=['name'],
+        Limit=0,
+        Filter='email = "' + email + '"'
+    )
+    users = response.get('Users', [])
+    exists = False
+    user = ''
+    if len(users) == 1:
+        attributes = {x['Name']:x['Value'] for x in users[0].get('Attributes', {})}
+        exists = users[0].get('UserStatus', '') == 'CONFIRMED'
+        user = attributes.get('name') or users[0].get('Username') or ''
+    return exists, user
 
 
-def get_names_for_programs(programs: Iterable[str]) -> Dict[str, str]:
+def pre_signup_handler(event):
     """
-    Given a list of programs, find their friendly (ie, customer given) name.
-    :param programs: a list of programs.
-    :return: a dict of {program:friendly-name}
+    Validates that a user is not already signed up, and is allowed to sign up.
     """
-    result = {}
-    program_items = programs_table.scan()['Items']
-    for item in program_items:
-        program = item.get('program')
-        if program in programs and 'program_name' in item:
-            result[program] = item.get('program_name')
-    return result
+    from amplio.rolemanager import manager
+    manager.open_tables()
+
+    email = _email_from_event(event)
+    user_pool = event.get('userPoolId', USER_POOL_ID)
+    print(f"Pre-signup handler checking validity for email address '{email}'.")
+
+    # Is the email address *already* confirmed to a user?
+    already_in_use, user = was_email_already_confirmed_to_user(email, UserPoolId=user_pool)
+    if already_in_use:
+        print(f"pre-signup event for existing user '{user}' with (new) email '{email}'. User pool '{user_pool}'. Event: '{event}'")
+        raise Exception(f"The email address '{email}' is in use by user '{user}'.")
+
+    # The email address isn't yet claimed. Validate the email address should have access.
+    is_known, by_domain = manager.is_email_known(email)
+    if not is_known:
+        print(f"pre-signup event for unrecognized email '{email}'. Event: '{event}'")
+        raise Exception(f"'{email}' is not authorized")
+
+    print(f"pre-signup event success for email '{email}'. Event: '{event}'")
 
 
-def get_user_access(email: str, user_pool_id=None):
+def token_generation_handler(event):
     """
-    Given a user's email address, return their access as given in the acm_users table.
-    Note that the access may be given to all users at the domain.
+    Adds the user's access to the claims returned to the client application.
     """
-    # First look up by user's full email address.
-    acm_user = users_table.get_item(Key={'email': email})
-    user_info = acm_user.get('Item')
-    if not user_info:
-        # Nothing specific to the user; look up by email domain.
-        parts = email.split('@')
-        if len(parts) != 2:
-            # This should never happen, because a user needs a valid email address to sign up.
-            raise Exception("'{}' is not a valid email address.".format(email))
-        org = parts[1]
-        acm_user = users_table.get_item(Key={'email': org})
-        user_info = acm_user.get('Item')
-        # If the user's organization isn't in the table, give them no access at all.
-        if not user_info:
-            user_info = {'edit': '', 'view': '', 'admin': False}
+    # De-implemented on 2022-01-12. We no longer return any additional data in claims.
+    # Applications must make another call to get the user's programs. This provides better
+    # scaling, and substantially reduces the size of the authorization token.
+    # if "response" not in event:
+    #     event["response"] = {}
+    # email = _email_from_event(event)
+    # user_pool_id = event.get('userPoolId')
+    # event["response"]["claimsOverrideDetails"] = {
+    #     "claimsToAddOrOverride": get_user_access(email, user_pool_id)
+    # }
 
-    # program:roles;program:roles...
-    programs_for_user = manager.get_programs_for_user(email)
-    # "s3:TEST;dbx:DEMO,XTEST-2"
-    configured_repositories = ';'.join(
-        f'{k}:{",".join(v)}' for k, v in get_configured_repositories(programs_for_user.keys()).items())
-    print('Repositories: {}'.format(configured_repositories))
-    # 'DEMO:AD,PM;TEST:*,AD,PM,CO,FO'
-    program_roles = ';'.join([p + ':' + r for p, r in programs_for_user.items()])
-    names = get_names_for_programs(programs_for_user.keys())
-    user_access = {'edit': user_info.get('edit', ''),
-                   'view': user_info.get('view', ''),
-                   'admin': user_info.get('admin', False),
-                   'programs': program_roles,
-                   'descriptions': json.dumps(names)
-                   }
-    if configured_repositories:
-        user_access['repositories'] = configured_repositories
-
+    # If we ever want to bring back the Message-Of-the-Day facility, re-configure the trigger for
+    # TokenGeneration_Authentication, and add code here something like this:
     # Warning to create new ID? Use Message-Of-Day facility.
-    # if user_pool_id == OLD_POOL_ID:
     #     global WARNING_DATE
     #     if not WARNING_DATE:
     #         WARNING_DATE = datetime(2021, 1, 25, 0, 0, 0, 0)
@@ -132,77 +109,28 @@ def get_user_access(email: str, user_pool_id=None):
     #                              'Contact support@amplio.org if you need assistance.'
     #         user_access['modButton'] = "Proceed"
 
-    print('Access for user {}: {}'.format(email, user_access))
-    return user_access
 
-
-# noinspection PyPep8Naming
-def was_email_already_confirmed_to_user(email: str, UserPoolId: str = USER_POOL_ID) -> tuple:
+def pre_authentication_handler(event):
     """
-    Look up an email address to see if it belongs to a confirmed user. If so, also return
-    the username.
+    Called early in the authentication process, which may still fail. This is an opportunity to log,
+    for instance, event['validationData'], which is a {k:v} of usermetadata from the application.
     """
-    response = cognito_client.list_users(
-        UserPoolId=UserPoolId,
-        AttributesToGet=[],
-        Limit=0,
-        Filter='email = "' + email + '"'
-    )
-    users = response.get('Users', [])
-    exists = len(users) == 1 and users[0].get('UserStatus', '') == 'CONFIRMED'
-    user = users[0].get('Username', '') if len(users) == 1 else ''
-    return exists, user
-
-
-def pre_signup_handler(event):
-    """
-    Validates that a user is not already signed up, and is allowed to sign up.
-    """
-    email = _email_from_event(event)
-    user_pool = event.get('userPoolId', USER_POOL_ID)
-    print(f"Pre-signup handler checking validity for email address '{email}'.")
-
-    # Is the email address *already* confirmed to a user?
-    confirmed, user = was_email_already_confirmed_to_user(email, UserPoolId=user_pool)
-    if confirmed:
-        print("pre-signup event for existing user '{}' with (new) email '{}'. User pool '{}'. Event: '{}'"
-              .format(user,
-                      email,
-                      user_pool,
-                      event))
-        raise Exception("That email address is in use by user '{}'.".format(user))
-
-    # The email address isn't yet claimed. Validate the email address should have access.
-    is_known, by_domain = manager.is_email_known(email)
-    if not is_known:
-        print("pre-signup event for unrecognized email '{}'. Event: '{}'".format(email, event))
-        raise Exception("'{}' is not authorized".format(email))
-
-    print("pre-signup event success for email '{}'. Event: '{}'".format(email, event))
-
-
-def token_generation_handler(event):
-    """
-    Adds the user's access to the claims returned to the client application.
-    """
-    if "response" not in event:
-        event["response"] = {}
-    email = _email_from_event(event)
-    user_pool_id = event.get('userPoolId')
-    event["response"]["claimsOverrideDetails"] = {
-        "claimsToAddOrOverride": get_user_access(email, user_pool_id)
-    }
+    pass
 
 
 # noinspection PyUnusedLocal
 def lambda_handler(event, context):
     print(event)
     trigger = event.get('triggerSource', '')
-    if trigger == 'TokenGeneration_Authentication' or trigger == 'TokenGeneration_RefreshTokens' or trigger.startswith(
-            'TokenGeneration'):
-        token_generation_handler(event)
-    elif trigger == 'PreSignUp_SignUp':
+    # If we ever want Message-Of-the-Day capability, re-implement this:
+    # if trigger == 'TokenGeneration_Authentication' or trigger == 'TokenGeneration_RefreshTokens' or trigger.startswith(
+    #         'TokenGeneration'):
+    #     token_generation_handler(event)
+    # el
+    if trigger == 'PreSignUp_SignUp':
         pre_signup_handler(event)
+    elif trigger == 'PreAuthentication_Authentication':
+        pre_authentication_handler(event)
 
     return event
 
@@ -223,72 +151,25 @@ if __name__ == '__main__':
 
 
     def test():
-        def get_access(email):
-            ua = get_user_access(email)
-            return ua
-
         rc_list = []
 
         # Should not be able to sign up existing user
-        result = simulate('PreSignUp_SignUp', 'demo@literacybridge.org')
+        result = simulate('PreSignUp_SignUp', 'amplio.demo@gmail.com')
         print(result)
-        rc = 0 if not result else 1
+        rc = 0 if 'exception' in result else 1
         rc_list.append(rc)
 
         # Should be able to sign up new user at known domain
         result = simulate('PreSignUp_SignUp', 'NaNaHeyHeyGoodBy@amplio.org')
         print(result)
-        rc = 0 if result else 1
+        rc = 0 if 'exception' not in result else 1
         rc_list.append(rc)
 
         # Should not be able to sign up random user at random domain.
         result = simulate('PreSignUp_SignUp', 'me@example.com')
         print(result)
-        rc = 0 if not result else 1
+        rc = 0 if 'exception' in result else 1
         rc_list.append(rc)
-
-        # Should get claims for known user.
-        result = simulate('TokenGeneration_Authentication', 'demo@literacybridge.org')
-        view = result.get('response', {}) \
-            .get('claimsOverrideDetails', {}) \
-            .get('claimsToAddOrOverride', {}) \
-            .get('view', '')
-        rc = 0 if 'DEMO' in view else 1
-        rc_list.append(rc)
-
-        access = get_access('demo@amplio.org')
-        print(access)
-        details = {x.split(':')[0]: x.split(':')[1] for x in access['programs'].split(';')}
-        rc = 0 if 'AD' in details['DEMO'] and 'PM' in details['UWR'] else 1
-        rc_list.append(rc)
-
-        access = get_access('@amplio.org')
-        print(access)
-        details = {x.split(':')[0]: x.split(':')[1] for x in access['programs'].split(';')}
-        rc = 0 if 'AD' in details['DEMO'] and 'PM' in details['UWR'] else 1
-        rc_list.append(rc)
-
-        programs = ['TEST', 'XTEST-2', 'DEMO']
-        repos = ['s3', 'dbx']
-        configured = get_configured_repositories(programs, repositories=repos)
-        print("Configured '{}': {}".format(repos, configured))
-        repos = ['s3']
-        configured = get_configured_repositories(programs, repositories=repos)
-        print("Configured '{}': {}".format(repos, configured))
-        repos = ['dbx']
-        configured = get_configured_repositories(programs, repositories=repos)
-        print("Configured '{}': {}".format(repos, configured))
-        repos = None
-        configured = get_configured_repositories(programs)
-        print("Configured '{}': {}".format(repos, configured))
-
-        configured = get_configured_repositories(programs, 's3')
-        print("Configured '{}': {}", 's3', configured)
-        configured = get_configured_repositories(programs, 'dbx')
-        print("Configured '{}': {}", 'dbx', configured)
-
-        access = get_access('bill@amplio.org')
-        print(access)
 
         return max(rc_list)
 
