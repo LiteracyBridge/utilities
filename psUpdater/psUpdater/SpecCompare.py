@@ -77,9 +77,11 @@ class SpecCompare():
 
         def list_recip(r: Spec.Recipient, delta: str) -> None:
             r_dict = asdict(r)
-            fullname = '/'.join([r_dict[n] for n in ['communityname', 'groupname', 'agent'] if r_dict[n]])
+            fullname = '/'.join(
+                [r_dict[n] for n in ['region', 'district', 'communityname', 'groupname', 'agent'] if r_dict[n]])
             values = [f'{k}: {_pr_val(r_dict[k])}' for k in r_dict.keys() if
-                      k not in ['recipientid', 'communityname', 'groupname', 'agent']]
+                      k not in ['region', 'district', 'recipientid', 'communityname', 'groupname', 'agent', 'affiliate',
+                                'partner', 'component']]
             results.append(f' Recipient {r.recipientid} "{fullname}" {delta}: {", ".join(values)}')
 
         def diff_recip(a: Spec.Recipient, b: Spec.Recipient) -> None:

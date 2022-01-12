@@ -213,7 +213,7 @@ def echo_handler(event, context):
 def upload_handler(data: BinBody, programid: QueryStringParam, email: Claim, return_diff: QueryStringParam = False,
                    comment: QueryStringParam = 'No comment provided'):
     return_diff = _bool_arg(return_diff)
-    print(f'Upload {len(data)} bytes in program {programid} for {email}. Return diff: {return_diff}')
+    print(f'Upload {len(data)} bytes in program {programid} for {email}. Return diff: {return_diff}, comment: {comment}')
     # Check that it's a valid program spec.
     importer = XlsImporter.Importer(programid)
     ok, errors = importer.do_open(data=data)

@@ -70,7 +70,6 @@ is_first = True
 class Recipient:
     country: str
     language: str
-    supportentity: str
     region: str = ''
     district: str = ''
     communityname: str = ''
@@ -81,6 +80,7 @@ class Recipient:
     group_size: int = 0
     numhouseholds: int = 0
     numtbs: int = 0
+    supportentity: str = ''
     agent_gender: str = None
     direct_beneficiaries: int = None
     direct_beneficiaries_additional: str = '{}'
@@ -98,7 +98,6 @@ class Recipient:
         op: Recipient = o
         eq: bool = self.country == op.country and \
                    self.language == op.language and \
-                   self.supportentity == op.supportentity and \
                    self.region == op.region and \
                    self.district == op.district and \
                    self.communityname == op.communityname and \
@@ -109,6 +108,7 @@ class Recipient:
                    self.group_size == op.group_size and \
                    self.numhouseholds == op.numhouseholds and \
                    self.numtbs == op.numtbs and \
+                   self.supportentity == op.supportentity and \
                    self.agent_gender == op.agent_gender and \
                    self.direct_beneficiaries == op.direct_beneficiaries and \
                    self.direct_beneficiaries_additional == op.direct_beneficiaries_additional and \
@@ -124,7 +124,6 @@ class Recipient:
 recipient_sql_2_csv = {
     'country': 'Country',
     'language': 'Language Code',
-    'supportentity': 'Support Entity',
     'region': 'Region',
     'district': 'District',
     'communityname': 'Community',
@@ -135,6 +134,7 @@ recipient_sql_2_csv = {
     'group_size': 'Group Size',  # int
     'numhouseholds': '# HH',  # int
     'numtbs': '# TBs',  # int
+    'supportentity': 'Support Entity',
     'agent_gender': 'Agent Gender',
     'direct_beneficiaries': 'Direct Beneficiaries',  # int
     'direct_beneficiaries_additional': 'Direct Beneficiaries Additional',  # json
@@ -145,9 +145,8 @@ recipient_sql_2_csv = {
     'partner': 'Partner',
     'component': 'Component'
 }
-recipient_required_fields: List[str] = ['country', 'language', 'supportentity']
-recipient_id_fields = ['country', 'region', 'district', 'communityname', 'groupname', 'agent', 'language', 'variant',
-                       'supportentity']
+recipient_required_fields: List[str] = ['country', 'language']
+recipient_id_fields = ['country', 'region', 'district', 'communityname', 'groupname', 'agent', 'language', 'variant']
 recipient_fields = {x.name: (x.type, x.default) for x in fields(Recipient)}
 if list([x.name for x in fields(Recipient)]) != list(recipient_sql_2_csv.keys()):
     raise Exception('Fields from "Recipient" don\'t match "recipient_sql_2_csv".')
