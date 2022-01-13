@@ -15,5 +15,5 @@ container="amplionetwork/abc:1.0"
 # docker run --rm --platform linux/386 --mount type=bind,source="$(pwd)/.",target=/audio --mount type=bind,source="$(pwd)/foo",target=/out dockerfile 
 
 mkdir -p tmp
-${cmd} ${audio} ${out} ${container} -o /out 0.a18 
-ffmpeg -hide_banner -yi tmp/0.a18.wav 0.mp3
+${cmd} ${audio} ${out} ${container} -o /out $1.a18 
+ffmpeg -v 0 -y -i tmp/$1.a18.wav $1.mp3
