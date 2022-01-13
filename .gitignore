@@ -8,4 +8,7 @@ populateDescriptions/
 populateProgspec/
 lambdaTemplate/
 layersTest/
+layersTestClient/
 cognitoLogin/
+package/
+pythonScratchProject/

@@ -165,6 +165,7 @@ def _gather_params(handler: Callable, event: LambdaEvent, context: LambdaContext
         Look up a parameter's value in the Dict. If the parameter is not found, try munging
         the name from sake_case to camelCase, and if such a value is found, return that.
         """
+        print(f'Looking for {key} in {values}')
         if key in values:
             return values[key]
         key = snake_to_camel(key)
