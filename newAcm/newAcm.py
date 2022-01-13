@@ -1,11 +1,13 @@
 #!/usr/bin/env zsh
 "exec" "./acmEnv/bin/python3" "newAcm.py" "$@"
 import argparse
+import os
 import shutil
 import subprocess
 import sys
 from os.path import expanduser
 from pathlib import Path
+from typing import Optional
 
 import boto3
 
@@ -16,7 +18,7 @@ from dynamoUtils import check_for_checkout, create_checkout_record, check_for_pr
     check_for_organization_record, create_organization_record
 
 from utils import set_dropbox_directory, canonical_acm_dir_name, canonical_acm_path_name, canonical_acm_project_name, \
-    StorePathAction
+   StorePathAction
 
 # s3 and projspec, dashboard buckets
 s3_client = boto3.client('s3')
@@ -25,11 +27,10 @@ content_bucket: str = 'amplio-program-content'
 project_list_bucket: str = 'dashboard-lb-stats'
 project_list_key: str = 'data/project_list.csv'
 
-
 # Properties of the two dropbox users: a maintaining user and the processing user.
 
 args = {}
-dropbox_directory:Path = None
+dropbox_directory: Optional[Path] = None
 
 # Get the user name and password that we need to sign into the SQL database. Configured through AWS console.
 
@@ -49,7 +50,6 @@ def _list_objects(Bucket, Prefix='', **kwargs):
 def fetch_template_progspec() -> bytes:
     """
     Download the template program specification to the desired file.
-    :param dest_path: to receive the program specification.
     :return:
     """
     import urllib.request
@@ -226,7 +226,7 @@ def initialize_programspec(program_id: str, is_s3: bool) -> bool:
     print(f'Creating program spec for {program_id}...', end='')
     if is_s3:
         # Copy the template program spec .xlsx file to the s3 progspec bucket.
-        data:bytes = fetch_template_progspec()
+        data: bytes = fetch_template_progspec()
         key = f'{program_id}/program_spec.xlsx'
         print(f"writing program spec to 's3://{projspec_bucket}/{key}'...", end='')
         kwargs = {'Bucket': projspec_bucket, 'Key': key, 'Body': data}
@@ -246,6 +246,7 @@ def initialize_programspec(program_id: str, is_s3: bool) -> bool:
         print(f'ok\n  -- Edit the spec and use the Dashboard to submit for {program_id}')
         return True
     return False
+
 
 # noinspection SqlResolve,SqlNoDataSourceInspection
 
@@ -356,7 +357,8 @@ def main():
     arg_parser.add_argument('acm', metavar='ACM', help='The new ACM name')
     arg_parser.add_argument('--s3', action='store_true', help='The program\'s content storage is in S3, not Drobpox.')
     arg_parser.add_argument('--name', required=True, help='what the customer calls the program.')
-    arg_parser.add_argument('--org', '--customer', metavar='customer', help='The customer running or sponsoring the program.')
+    arg_parser.add_argument('--org', '--customer', metavar='customer',
+                            help='The customer running or sponsoring the program.')
     arg_parser.add_argument('--parent', '--affiliate', help='The program\'s organization\'s parent.', default='Amplio')
     arg_parser.add_argument('--admin', help='Email address of the program administrator.')
     arg_parser.add_argument('--dry-run', '--dryrun', '-n', action='store_true', help='Don\'t update anything.')
