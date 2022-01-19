@@ -226,13 +226,13 @@ def initialize_programspec(program_id: str, is_s3: bool) -> bool:
     print(f'Creating program spec for {program_id}...', end='')
     if is_s3:
         # Copy the template program spec .xlsx file to the s3 progspec bucket.
-        data: bytes = fetch_template_progspec()
-        key = f'{program_id}/program_spec.xlsx'
-        print(f"writing program spec to 's3://{projspec_bucket}/{key}'...", end='')
-        kwargs = {'Bucket': projspec_bucket, 'Key': key, 'Body': data}
-        put_result = s3_client.put_object(**kwargs)
-        if put_result.get('ResponseMetadata', {}).get('HTTPStatusCode', 0) == 200:
-            print('ok\n  -- Download the spec, edit appropriately, and use the dashboard to submit')
+        from_key = 'template/pub_progspec.xlsx'
+        to_key = f'{program_id}/pub_progspec.xlsx'
+        print(f"copying program spec to 's3://{projspec_bucket}/{to_key}'...", end='')
+        kwargs = {'Bucket': projspec_bucket, 'Key': to_key, 'CopySource': {'Bucket': projspec_bucket, 'Key': from_key}}
+        copy_result = s3_client.copy_object(**kwargs)
+        if copy_result.get('ResponseMetadata', {}).get('HTTPStatusCode', 0) == 200:
+            print('ok\n  -- Download the spec and edit it, or use the Amplio Suite to edit the program spec.')
             return True
     else:
         # Copy the template program spec .xlsx file to the programspec directory in Dropbox.

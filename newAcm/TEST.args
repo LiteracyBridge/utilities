@@ -1,11 +1,25 @@
---organization
+--customer
 Amplio SW Development
---parent-organization
+--parent
 Amplio Testing
 --admin
 bill@amplio.org
 --s3
+--name
+ACM database for testing dropbox-less
+--do-content
+none
 --do-dropbox
 none
---comment
-ACM database for testing dropbox-less
+--do-sql
+none
+--do-dashboard
+none
+--do-checkout
+none
+--do-progspec
+both
+--do-program
+none
+--do-organization
+none
