@@ -16,11 +16,15 @@ UNPUBLISHED_PREFIX: str = 'unpub_'
 CSV_ARTIFACTS = ['general', 'deployments', 'content', 'recipients']
 
 class Exporter:
-    def __init__(self, program_id: str, engine: Engine):
+    def __init__(self, program_id: str, engine: Engine, program_spec: Spec.Program = None):
         self.program_id = program_id
-        self.program_spec = Spec.Program(program_id)
         self.engine = engine
-        self._opened = False
+        if program_spec is None:
+            self.program_spec = Spec.Program(program_id)
+            self._opened = False
+        else:
+            self.program_spec = program_spec
+            self._opened = True
 
     def do_open(self) -> Spec.Program:
         """
@@ -77,6 +81,9 @@ class Exporter:
             except Exception as ex:
                 result = False
                 errors.append(f'Could not convert {artifact}  for {self.program_id} to .csv: {str(ex)}.')
+                return result
+            # A brand-new, empty program spec may not have a 'general' tab; that's fine.
+            if csv_str is None and artifact=='general':
                 return result
             # Write to a file if desired.
             if path is not None:

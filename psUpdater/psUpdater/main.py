@@ -267,6 +267,29 @@ def do_import(programs: List[str], what: Any, commit: bool = True) -> None:
             print(*errors, sep='\n')
 
 
+def do_copy():
+    global args, engine
+    if len(args.copy) != 2:
+        raise Exception('Must provide exactly two arguments to copy.')
+    if len(args.programs) != 1:
+        raise Exception('Copy only works with a single program at a time.')
+    in_spec: Path = args.copy[0]
+    out_spec: Path = args.copy[1]
+    program = args.programs[0]
+
+    with in_spec.open('rb') as input_file:
+        data = input_file.read()
+        importer = XlsImporter.Importer(program)
+        ok, issues = importer.do_open(data=data)
+        if len(issues) > 0:
+            print(*issues, sep='\n')
+        if ok:
+            exporter = XlsExporter.Exporter(program, engine, program_spec=importer.program_spec)
+            ok, issues = exporter.do_save(path=out_spec)
+            if len(issues) > 0:
+                print(*issues, sep='\n')
+
+
 def do_compare(comparees):
     global args
     importer_a = XlsImporter.Importer(args.programs[0])
@@ -318,6 +341,8 @@ def main():
                             help='Database disposition for the import operation.')
     arg_parser.add_argument('--export', dest='exports', action='store_true', help='Export from SQL to CSV.')
 
+    arg_parser.add_argument('--copy', nargs=2, action=StorePathAction, help='Copy a program spec, removing extranea.')
+
     arg_parser.add_argument('--group', choices=['programs', 'specs', 'both', 'tests', 'go-for-it'],
                             help='Process one of the pre-defined groups of programs')
 
@@ -358,6 +383,8 @@ def main():
         do_import(args.programs, args.imports, args.disposition == 'commit')
     elif args.comparees:
         do_compare(args.comparees)
+    elif args.copy:
+        do_copy()
 
 
 if __name__ == '__main__':
