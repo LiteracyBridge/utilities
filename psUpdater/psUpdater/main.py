@@ -10,6 +10,8 @@ import XlsExporter
 import XlsImporter
 import db
 from SpecCompare import SpecCompare
+from psUpdater import Spec
+from psUpdater.SpecHandler import lambda_router
 
 engine: Optional[Engine] = None
 
@@ -289,6 +291,44 @@ def do_copy():
             if len(issues) > 0:
                 print(*issues, sep='\n')
 
+def do_handler():
+    global args
+    email = 'bill@amplio.org'
+    for program in args.programs:
+        event = {
+            'requestContext': {
+                'authorizer': {'claims': {'email': email}}
+            },
+            'queryStringParameters': {'programid': program},
+            'pathParameters': {'proxy': args.handler[0]},
+            'httpMethod': 'GET',
+        }
+        context = {}
+        result = lambda_router(event, context)
+        print(result)
+
+def do_test():
+    global args
+    from psUpdater import testdata
+
+    testdata.init(args, engine=engine)
+    testdata.run_tests(args.test)
+
+def do_json():
+    global args, engine
+    for program in args.programs:
+        import json
+        output_path = args.json
+        if '{' in str(output_path):
+            name = str(output_path).format(program_id=program)
+            output_path = Path(name)
+        if not output_path.exists():
+            output_path.mkdir(parents=True, exist_ok=True)
+        exporter = XlsExporter.Exporter(program, engine)
+        exporter.read_from_database()
+        content = Spec.progspec_to_json(exporter.program_spec)
+
+        print(json.dumps(content, indent=2))
 
 def do_compare(comparees):
     global args
@@ -343,6 +383,12 @@ def main():
 
     arg_parser.add_argument('--copy', nargs=2, action=StorePathAction, help='Copy a program spec, removing extranea.')
 
+    arg_parser.add_argument('--json', nargs=1, action=StorePathAction, help='Save the program spec as .json')
+
+    arg_parser.add_argument('--handler', nargs=1, help='Run a spec handler')
+
+    arg_parser.add_argument('--test', help='Run a test.')
+
     arg_parser.add_argument('--group', choices=['programs', 'specs', 'both', 'tests', 'go-for-it'],
                             help='Process one of the pre-defined groups of programs')
 
@@ -385,6 +431,12 @@ def main():
         do_compare(args.comparees)
     elif args.copy:
         do_copy()
+    elif args.json:
+        do_json()
+    elif args.handler:
+        do_handler()
+    elif args.test:
+        do_test()
 
 
 if __name__ == '__main__':

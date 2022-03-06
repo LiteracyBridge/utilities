@@ -4,6 +4,8 @@ import inspect
 import json
 import re
 from dataclasses import dataclass
+from datetime import date, datetime
+from json import JSONEncoder
 from typing import Any, Dict, Callable, Tuple, Union
 
 import amplio.rolemanager.manager as roles_manager
@@ -12,6 +14,7 @@ from pydantic.main import ModelMetaclass
 roles_manager.open_tables()
 
 LambdaDict = Dict[str, Any]
+
 
 class LambdaEvent(dict):
     pass
@@ -94,6 +97,14 @@ def snake_to_camel(string: str) -> str:
     return words[0] + "".join(word.capitalize() for word in words[1:])
 
 
+# subclass JSONEncoder
+class DateTimeEncoder(JSONEncoder):
+    # Override the default method
+    def default(self, obj):
+        if isinstance(obj, (date, datetime)):
+            return obj.isoformat()
+
+
 def response(status_code: int, body: Dict) -> Dict:
     return {
         "statusCode": status_code,
@@ -101,7 +112,7 @@ def response(status_code: int, body: Dict) -> Dict:
             "Access-Control-Allow-Origin": '*',
             "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
         },
-        "body": json.dumps(body)
+        "body": json.dumps(body, cls=DateTimeEncoder)
     }
 
 
@@ -194,7 +205,7 @@ def _gather_params(handler: Callable, event: LambdaEvent, context: LambdaContext
         if body_bytes is None:
             body = bytes(event["body"], 'utf-8')
             # The event lies about isBase64Encoded. It is.
-            body_bytes = binascii.a2b_base64(body) #if event.get('isBase64Encoded', False) else bytes(body)
+            body_bytes = binascii.a2b_base64(body)  # if event.get('isBase64Encoded', False) else bytes(body)
         return body_bytes
 
     # What arguments does the handler want?
@@ -341,16 +352,20 @@ def handler(roles: str = None, programid: Callable[..., str] = None) -> Any:
 
     return decorator
 
+
 @dataclass
 class Handler():
     function: Callable[..., Tuple[Any, int]]
     get_program_id: Callable[..., str] = None
 
+
 def NeedsRole(needed_roles: str) -> Callable:
     def decorator_needs_roles(func: Callable) -> Callable:
         func.needed_roles = needed_roles
         return func
+
     return decorator_needs_roles
+
 
 class LambdaRouter():
     """
@@ -372,22 +387,27 @@ class LambdaRouter():
             action = the_router.pathParam(0)
             the_router.dispatch(action)
     """
+
     def __init__(self, event, context, handlers: Dict[str, Union[Callable, Handler]]):
         self._event = event
         self._context = context
-        self._handlers = {n:h if isinstance(h, Handler) else Handler(h) for n,h in handlers.items()}
+        self._handlers = {n: h if isinstance(h, Handler) else Handler(h) for n, h in handlers.items()}
 
     @property
     def queryStringParams(self):
         return self._event.get('queryStringParameters', {})
+
     def queryStringParam(self, name: str):
         return self._event.get('queryStringParameters', {}).get(name)
+
     @property
     def pathParams(self):
         return self._event.get('pathParameters', {}).get('proxy', '').split('/')
+
     def pathParam(self, index: int):
         params = self._event.get('pathParameters', {}).get('proxy', '').split('/')
         return params[index] if index < len(params) else None
+
     def claim(self, name: str):
         return self._event.get('requestContext', {}).get('authorizer', {}).get('claims', {}).get(name)
 
@@ -414,7 +434,8 @@ class LambdaRouter():
         if needed_roles:
             programid = self._determine_programid(handler, params)
             if not self._user_has_needed_roles(needed_roles, self.claim('email'), programid):
-                return response(status_code=403, body={'message': 'This user does not have an appropriate role in the program'})
+                return response(status_code=403,
+                                body={'message': 'This user does not have an appropriate role in the program'})
 
         result: Any = None
         returned_value = handler.function(**params)
@@ -432,4 +453,3 @@ class LambdaRouter():
             return exception_response(result)
 
         return response(status_code=status_code or 200, body=result)
-

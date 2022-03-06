@@ -8,11 +8,15 @@ from sqlalchemy.engine import Engine
 import Spec
 import SpecCompare
 from Spec import Program
+from ImportProcessor import ImportProcessor
+from XlsExporter import Exporter
 
 print("Importing db, then XlsImporter")
 import db
 import XlsImporter
 import XlsExporter
+
+print('SpecHandler loading.')
 
 STATUS_OK = 'ok'
 STATUS_FAILURE = 'failure'
@@ -208,12 +212,53 @@ def echo_handler(event, context):
     }
 
 
+@NeedsRole('AD,PM')
+def get_content(programid: QueryStringParam):
+    engine: Engine = db.get_db_engine()
+    exporter = XlsExporter.Exporter(programid, engine)
+    exporter.read_from_database()
+    content = Spec.progspec_to_json(exporter.program_spec)
+    return content
+
+@NeedsRole('AD,PM')
+def put_content(programid: QueryStringParam, data: JsonBody, return_diff: QueryStringParam = False):
+    """
+    Update one or more sections of the program spec.
+    :param programid: The program whose spec is to be updated.
+    :param data: The data.
+    :param return_diff: If true, return a diff of the program spec.
+    :return: the update status, and the diff if requested.
+    """
+    print(f'put content for {programid}, data: {data}')
+    engine: Engine = db.get_db_engine()
+    return_diff: bool = _bool_arg(return_diff)
+    new_spec: Program = Spec.progspec_from_json(programid, data)
+
+    diffs = None
+    if return_diff:
+        # Get existing content.
+        exporter: Exporter = XlsExporter.Exporter(programid, engine)
+        exporter.read_from_database()
+
+        differ: SpecCompare = SpecCompare.SpecCompare(exporter.program_spec, new_spec)
+        diffs = differ.diff(content_only=True)
+        print(diffs)
+
+    importer: ImportProcessor = ImportProcessor(programid, new_spec)
+    with db.get_db_connection(engine=engine) as conn:
+        importer.update_db_program_spec(conn, content_only=True)
+        result = {'status': 'ok'}
+        if return_diff:
+            result['updates'] = diffs
+        return result
+
 # @handler(roles='AD,PM')
 @NeedsRole('AD,PM')
 def upload_handler(data: BinBody, programid: QueryStringParam, email: Claim, return_diff: QueryStringParam = False,
                    comment: QueryStringParam = 'No comment provided'):
     return_diff = _bool_arg(return_diff)
-    print(f'Upload {len(data)} bytes in program {programid} for {email}. Return diff: {return_diff}, comment: {comment}')
+    print(
+        f'Upload {len(data)} bytes in program {programid} for {email}. Return diff: {return_diff}, comment: {comment}')
     # Check that it's a valid program spec.
     importer = XlsImporter.Importer(programid)
     ok, errors = importer.do_open(data=data)
@@ -221,7 +266,7 @@ def upload_handler(data: BinBody, programid: QueryStringParam, email: Claim, ret
         # Looks good, save to S3.
         metadata = {'submitter-email': email,
                     'submitter-comment': comment,
-                    'submission-date': datetime.datetime.now().isoformat()}
+                    'submission-date': datetime.now().isoformat()}
 
         key = _program_key(programid, PENDING_PROGSPEC_KEY)
         put_result = s3.put_object(Body=data, Bucket=PROGSPEC_BUCKET, Metadata=metadata, Key=key)
@@ -262,7 +307,7 @@ def compare_handler(programid: QueryStringParam, v1: QueryStringParam, v2: Query
         # Get the db-staged program spec.
         engine: Engine = db.get_db_engine()
         exporter: XlsExporter.Exporter = XlsExporter.Exporter(program_id=programid, engine=engine)
-        unpublished_spec: Spec.Program = exporter.do_open()
+        unpublished_spec: Spec.Program = exporter.read_from_database()
         return unpublished_spec
 
     if v1 == 'published':
@@ -293,7 +338,8 @@ def accept_handler(programid: QueryStringParam, email: Claim, comment: QueryStri
                    publish: QueryStringParam = False):
     original_publish = publish
     publish = _bool_arg(publish)
-    print(f'Accept pending program spec for program {programid} by {email}. Publish: {publish} (orig: {original_publish}).')
+    print(
+        f'Accept pending program spec for program {programid} by {email}. Publish: {publish} (orig: {original_publish}).')
     pending_key = _program_key(programid, PENDING_PROGSPEC_KEY)
     ok, errors, importer = _open_program_spec_from_s3(programid=programid, key=pending_key)
     engine: Engine = db.get_db_engine()
@@ -327,7 +373,7 @@ def publish_handler(programid: QueryStringParam, email: Claim, comment: QueryStr
     comment = comment or 'No comment provided'
     metadata = {'submitter-email': email,
                 'submitter-comment': comment,
-                'submission-date': datetime.datetime.now().isoformat()}
+                'submission-date': datetime.now().isoformat()}
     print(metadata)
     # Get the db-staged program spec.
     engine: Engine = db.get_db_engine()
@@ -346,6 +392,17 @@ def publish_handler(programid: QueryStringParam, email: Claim, comment: QueryStr
 # @handler(roles='AD,PM,CO')
 @NeedsRole('AD,PM,CO')
 def download_handler(programid: QueryStringParam, artifact: QueryStringParam, aslink: QueryStringParam, email: Claim):
+    """
+    Returns a program spec artifact as the bytes of a file or a link to a file in S3.
+    :param programid: The program for which the artifact is desired.
+    :param artifact: Which artifact, one of 'unpublished', 'published', 'general', 'deployments', 'content',
+                or 'recipients'. 'unpublished' is the unpublished program spec (what one sees in the Amplio
+                Suite as a .xlsx file, 'published' is the published .xlsx spreadsheet, the others are the
+                corresponding .csv files.
+    :param aslink: Boolean. If true, returns a link to the file.
+    :param email: The user's email
+    :return: {'status': status, 'data': bytes-or-link, 'object': metadata-about-object}
+    """
     aslink = _bool_arg(aslink)
     artifact = artifact.lower()
     key = _s3_key_for(programid, artifact)
@@ -353,10 +410,10 @@ def download_handler(programid: QueryStringParam, artifact: QueryStringParam, as
     if artifact == UNPUBLISHED_ARTIFACT_NAME:
         metadata = {'submitter-email': email,
                     'submitter-comment': 'Unpublished created for download.',
-                    'submission-date': datetime.datetime.now().isoformat()}
+                    'submission-date': datetime.now().isoformat()}
         engine: Engine = db.get_db_engine()
         exporter: XlsExporter.Exporter = XlsExporter.Exporter(program_id=programid, engine=engine)
-        exporter.do_open()
+        exporter.read_from_database()
         ok, errors = exporter.save_unpublished(bucket=PROGSPEC_BUCKET, metadata=metadata)
     if key:
         params, obj_info = _get_s3_params_and_obj_info(key)
@@ -422,7 +479,9 @@ PROGSPEC_HANDLERS = {'upload': upload_handler,
                      'download': download_handler,
                      'list': list_objects,
                      'validate': validation_handler,
-                     'echo': echo_handler
+                     'echo': echo_handler,
+                     'get_content': get_content,
+                     'put_content': put_content,
                      }
 
 
@@ -430,6 +489,7 @@ def lambda_router(event, context):
     the_router = LambdaRouter(event, context, handlers=PROGSPEC_HANDLERS)
     action = the_router.pathParam(0)
     return the_router.dispatch(action)
+
 
 # def lambda_router(event, context, action: str = path_param(0)):
 #     if action == 'upload':

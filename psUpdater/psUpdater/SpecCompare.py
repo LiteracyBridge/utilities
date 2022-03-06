@@ -28,8 +28,8 @@ def _pr_diff(a, b) -> str:
 
 class SpecCompare():
     def __init__(self, a: Program, b: Program):
-        self.a = a
-        self.b = b
+        self.a: Program = a
+        self.b: Program = b
 
     def diff_deployments(self) -> List[str]:
         """
@@ -180,8 +180,8 @@ class SpecCompare():
 
         results: List[str] = []
         # These are deployments from the content tab, not the deployments tab.
-        a_deployments = Spec.flat_content_to_hierarchy(self.a.content)
-        b_deployments = Spec.flat_content_to_hierarchy(self.b.content)
+        a_deployments = Spec.flat_content_to_hierarchy(self.a)
+        b_deployments = Spec.flat_content_to_hierarchy(self.b)
         # We don't actually care about deployments added/removed here, only about the playlists targeted for
         # those deployments. When reporting these changes, we'll state them in terms of playlists.
         depls_added: List[int] = [n for n in b_deployments.keys() if n not in a_deployments]
@@ -197,16 +197,17 @@ class SpecCompare():
 
         return results
 
-    def diff(self) -> List[str]:
+    def diff(self, content_only:bool = False) -> List[str]:
         result: List[str] = []
-        changes = self.diff_deployments()
-        if len(changes) > 0:
-            result.append('Deployments')
-            result.extend(changes)
-        changes = self.diff_recipients()
-        if len(changes) > 0:
-            result.append('Recipients')
-            result.extend(changes)
+        if not content_only:
+            changes = self.diff_deployments()
+            if len(changes) > 0:
+                result.append('Deployments')
+                result.extend(changes)
+            changes = self.diff_recipients()
+            if len(changes) > 0:
+                result.append('Recipients')
+                result.extend(changes)
         changes = self.diff_content()
         if len(changes) > 0:
             result.append('Content')

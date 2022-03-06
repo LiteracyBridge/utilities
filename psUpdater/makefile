@@ -57,6 +57,11 @@ remove_unused:
 	rm -rf ./package/tmp/rsa*
 	rm -rf ./package/tmp/pyasn1*
 
+	# non-lambda files and test artifacts
+	rm     ./package/tmp/main.py
+	rm     ./package/tmp/testdata.py
+	rm     ./package/tmp/*.bin
+
 
 zip:
 	cd ./package/tmp && zip -r ../$(PROJECT).zip .

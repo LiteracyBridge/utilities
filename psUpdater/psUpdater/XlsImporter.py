@@ -6,6 +6,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from sqlalchemy.engine import Engine
 
 import Spec
+import db
 from ImportProcessor import ImportProcessor
 from ImportValidator import Validator
 from Spec import content_sql_2_csv, recipient_sql_2_csv, deployment_sql_2_csv
@@ -105,15 +106,16 @@ class Importer:
             raise Exception("Attempt to update database with an un-opened program spec.")
         importer = ImportProcessor(self.program_id, self._program_spec)
 
-        with engine.connect() as conn:
+        with db.get_db_connection(engine=engine) as conn:
             transaction = conn.begin()
-            importer.update_database(conn)
+            importer.update_db_program_spec(conn)
             if commit:
                 transaction.commit()
                 print(f'Changes commited for {self.program_id}')
             else:
                 transaction.rollback()
                 print(f'Changes rolled back for {self.program_id}')
+
         return True, []
 
     def do_import(self, what, *, data: bytes = None, engine: Engine, commit: bool) -> \

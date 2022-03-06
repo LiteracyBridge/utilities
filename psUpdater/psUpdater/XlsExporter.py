@@ -26,7 +26,7 @@ class Exporter:
             self.program_spec = program_spec
             self._opened = True
 
-    def do_open(self) -> Spec.Program:
+    def read_from_database(self) -> Spec.Program:
         """
         Executes the SQL select statements to create the program spec.
         """
@@ -37,6 +37,7 @@ class Exporter:
                 text(f"SELECT {','.join(columns)} FROM {table} WHERE {programid_column} = :program_id {order_by};"),
                 {'program_id': self.program_id})
 
+        # This isn't an updating connection, so we don't need the context manager wrapped auto-restore-content one.
         with self.engine.connect() as conn:
             result = query_table(content_sql_2_csv.keys(), 'content')
             for row in result:
@@ -184,5 +185,5 @@ class Exporter:
 
     def do_export(self, output_path: Path = None, bucket: str = None, metadata: Dict[str, str] = None) -> Tuple[
         bool, List[str]]:
-        self.do_open()
+        self.read_from_database()
         return self.do_save(path=output_path, bucket=bucket, metadata=metadata)

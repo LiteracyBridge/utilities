@@ -3,7 +3,7 @@ import json
 import re
 from dataclasses import dataclass, field, fields
 from datetime import datetime, date
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 """
 Yet another ProgramSpec definition. Contains only what is needed for the spreadsheet importer/exporter.
@@ -321,7 +321,7 @@ class Program:
         startdate = asdate(deployment['startdate'])
         enddate = asdate(deployment['enddate'])
         depl = deployment.get('deployment')
-        if not depl:
+        if not depl and startdate:
             depl = f"{self.program_id}-{startdate.strftime('%y')}-{deploymentnumber}"
 
         normalized = {'deploymentnumber': deploymentnumber, 'startdate': startdate, 'enddate': enddate,
@@ -378,6 +378,7 @@ class DbMessage:
     sdg_target_id: str = field(default=None)
     key_points: str = field(default='.')
     languages: str = field(default=None)
+    audience: str = field(default=None)
 
 
 @dataclass
@@ -397,7 +398,7 @@ class DbDeployment:
     db_playlists: Dict[str, DbPlaylist] = field(default_factory=dict)
 
 
-def flat_content_to_hierarchy(contents: List[Content], category_code_converter=lambda x: x) -> Dict[int, DbDeployment]:
+def flat_content_to_hierarchy(program_spec: Program, category_code_converter=lambda x: x) -> Dict[int, DbDeployment]:
     def unflatten_content(content: Content) -> None:
         """
         Add one row from a content.csv to the tree of messages for a program. Create the parent Playlist and Deployment
@@ -414,7 +415,8 @@ def flat_content_to_hierarchy(contents: List[Content], category_code_converter=l
         db_playlist: DbPlaylist = db_deployment.db_playlists.setdefault(content.playlist_title,
                                                                         DbPlaylist(
                                                                             len(db_deployment.db_playlists) + 1,
-                                                                            content.playlist_title))
+                                                                            content.playlist_title,
+                                                                            content.audience))
 
         # Values for the database. Language is still special; get the list here, and create auxillary records later.
         language = row.get('languagecode', row.get('language', '[]'))
@@ -423,7 +425,7 @@ def flat_content_to_hierarchy(contents: List[Content], category_code_converter=l
         sdg_target_id: str = str(content.sdg_targets) or None
         sdg_target: str = sdg_target_id.split('.')[1] if sdg_target_id else None
 
-        # This whould be better as a string column of the category name, because user may need to disambiguate.
+        # This would be better as a string column of the category name, because user may need to disambiguate.
         default_category_code = category_code_converter(content.default_category)
 
         # Create Message, and store it.
@@ -432,12 +434,92 @@ def flat_content_to_hierarchy(contents: List[Content], category_code_converter=l
                                variant=content.variant,
                                sdg_goal_id=sdg_goal_id, sdg_target=sdg_target, sdg_target_id=sdg_target_id,
                                key_points=content.key_points,
-                               languages=language)
+                               languages=language, audience=content.audience)
         db_playlist.db_messages.append(db_message)
 
     _db_deployments: Dict[int, DbDeployment] = {}
-    for c in contents:
+    for d in program_spec.deployments:
+        _db_deployments[d.deploymentnumber] = DbDeployment(d.deploymentnumber, d.startdate, d.enddate, d.deployment)
+
+    for c in program_spec.content:
         unflatten_content(c)
     # ensure deploymentnumber order
     _db_deployments = {num: _db_deployments[num] for num in sorted(list(_db_deployments.keys()))}
     return _db_deployments
+
+
+def progspec_to_json(program_spec: Program) -> List[Dict]:
+    """
+    From an opened exporter, return a list of deployments, each with a list of playlists, each with a list of messages.
+    :param exporter: Opened reporter, with deployment data.
+    :return: [ {deploymentnumber: n, playlists: [ {position: n, audience:'audience', messages: [ {...
+    """
+    deployments: List[Dict] = sorted([dataclasses.asdict(x) for x in
+                           flat_content_to_hierarchy(program_spec).values()], key=lambda d:d.get('deploymentnumber'))
+    for depl in deployments:
+        playlists = sorted([x for x in depl['db_playlists'].values()], key=lambda pl:pl.get('position'))
+        del depl['db_playlists']
+        for pl in playlists:
+            pl['messages'] = sorted(pl['db_messages'], key=lambda m:m.get('position'))
+            del pl['db_messages']
+        depl['playlists'] = playlists
+    return deployments
+
+
+
+def progspec_from_json(programid: str, progspec_data: Union[List,Dict]) -> Program:
+    def content_from_hierarchy(deployment_num: int, pl: Dict) -> None:
+        playlist_title = pl.get('title')
+        if playlist_title:
+            audience = pl.get('audience')
+            messages = sorted([msg for msg in pl.get('messages') if msg.get('title')], key=lambda m:m.get('position'))
+            for msg in messages:
+                message_title = msg.get('title')
+                key_points = msg.get('key_points')
+                languagecode = msg.get('languages')
+                variant = msg.get('variant')
+                format = msg.get('format')
+                default_category = msg.get('default_category_code')
+                sdg_goals = msg.get('sdg_goal_id')
+                sdg_targets = msg.get('sdg_target_id')
+                audience = msg.get('audience', audience)
+                result.add_content({
+                    'deployment_num': deployment_num,
+                    'deploymentnumber': deployment_num,
+                    'playlist_title': playlist_title,
+                    'message_title': message_title,
+                    'key_points': key_points,
+                    'languagecode': languagecode,
+                    'languages': languagecode,
+                    'variant': variant,
+                    'format': format,
+                    'audience': audience,
+                    'default_category': default_category,
+                    'sdg_goals': sdg_goals,
+                    'sdg_targets': sdg_targets,
+                })
+
+    def deployment_from_hierarchy(depl: Dict) -> None:
+        deploymentnumber = depl.get('deploymentnumber')
+        result.add_deployment({k:v for k,v in depl.items() if k in deployment_fields.keys()})
+        for pl in depl.get('playlists'):
+            content_from_hierarchy(deploymentnumber, pl)
+
+    deployments = None
+    recipients = None
+    if isinstance(progspec_data, dict):
+        deployments = progspec_data.get('deployments')
+        recipients = progspec_data.get('recipients')
+    elif isinstance(progspec_data, list):
+        item = progspec_data[0]
+        if 'deploymentnumber' in item:
+            deployments = progspec_data
+        elif 'communityname' in item:
+            recipients = progspec_data
+
+
+    result: Program = Program(programid)
+    if deployments:
+        for depl in deployments:
+            deployment_from_hierarchy(depl)
+    return result

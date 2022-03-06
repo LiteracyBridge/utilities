@@ -30,7 +30,7 @@
 #	aws lambda update-function-configuration --function-name $(FUNCTION_NAME) \
 #	--layers $(shell aws lambda list-layer-versions  --layer-name amplio-layer --query 'LayerVersions[0].LayerVersionArn')
 #
-for f in `ls -d ../amplio-layer/python/*info`; do
+for f in `ls -d ../amplio-layer/python/*info` sqlalchemy dateutil; do
   fn=${f##*/}
   p=${fn%%-*}
   to_rem="./package/tmp/${p}*"
