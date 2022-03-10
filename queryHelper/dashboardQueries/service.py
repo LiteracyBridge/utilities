@@ -71,6 +71,7 @@ aggregations = {'sum': 'sum(', 'count': 'count(distinct '}
 choosable_columns = [
     'deploymentnumber',
     'deployment',
+    'deploymentname',
     'startdate',
 
     'contentpackage',
