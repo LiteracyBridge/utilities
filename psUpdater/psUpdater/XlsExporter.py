@@ -8,12 +8,12 @@ from sqlalchemy.engine import Engine
 
 import ExportProcessor
 import Spec
-from Spec import content_sql_2_csv, recipient_sql_2_csv, deployment_sql_2_csv
 
 PUBLISHED_PREFIX: str = 'pub_'
 UNPUBLISHED_PREFIX: str = 'unpub_'
 
 CSV_ARTIFACTS = ['general', 'deployments', 'content', 'recipients']
+
 
 class Exporter:
     def __init__(self, program_id: str, engine: Engine, program_spec: Spec.Program = None):
@@ -31,23 +31,32 @@ class Exporter:
         Executes the SQL select statements to create the program spec.
         """
 
-        def query_table(columns: List[str], table: str, programid_column: str = 'project', order_by: str = ''):
+        # noinspection PyShadowingNames
+        def query_table(columns: List[str], table: str, programid_column: str = 'project', group_by: str = '',
+                        order_by: str = ''):
             # Programid_column is provided by this application, not by the user. Safe to embed in a SQL string.
             return conn.execute(
-                text(f"SELECT {','.join(columns)} FROM {table} WHERE {programid_column} = :program_id {order_by};"),
+                text(
+                    f"SELECT {','.join(columns)} FROM {table} WHERE {programid_column} " +
+                    f"= :program_id {group_by} {order_by};"),
                 {'program_id': self.program_id})
 
         # This isn't an updating connection, so we don't need the context manager wrapped auto-restore-content one.
         with self.engine.connect() as conn:
-            result = query_table(content_sql_2_csv.keys(), 'content')
+            result = query_table(Spec.content_sql_2_csv.keys(), 'content')
             for row in result:
                 self.program_spec.add_content(dict(row))
 
-            result = query_table(recipient_sql_2_csv.keys(), 'recipients')
+            result = query_table(Spec.recipient_sql_2_csv.keys(), 'recipients')
             for row in result:
                 self.program_spec.add_recipient(dict(row))
 
-            result = query_table(deployment_sql_2_csv.keys(), 'deployments', order_by='ORDER BY deploymentnumber')
+            columns = [x for x in Spec.deployment_sql_2_csv.keys()]
+            columns.append('deployment')
+            group_by = f'group by {",".join(columns)}'
+            columns.append(
+                "deployment in (select distinct deployment from tbsdeployed where project=:program_id) as deployed")
+            result = query_table(columns, 'deployments', group_by=group_by, order_by='ORDER BY deploymentnumber')
             for row in result:
                 self.program_spec.add_deployment(dict(row))
 
@@ -64,50 +73,54 @@ class Exporter:
                 names: Dict[str, str] = None, metadata: Dict[str, str] = None) -> Tuple[bool, List[str]]:
         """
         Publishes the program spec from the PostgreSQL database to files/objects.
+        :param artifacts: which artifacts are desired? 'published', 'general', 'deployments', 'content', 'recipients'
+        :param metadata: metadata to add to s3 object(s)
+        :param names: file/object names to use instead of defaults.
         :param path: If provided, the path to which files will be written.
         :param bucket: If provided, the bucket into which objects will be written.
         :return: 
         """
 
-        def publish_csv(artifact: str) -> bool:
+        def publish_csv(art: str) -> bool:
             """
             Publish a single .csv file. May be written to a local file and/or an S3 bucket.
-            :param artifact: The name of the data, 'content', 'recipients', etc.
+            :param art: The name of the data, 'content', 'recipients', etc.
             :return: A list of errors that were detected. An empty list if no errors.
             """
             # Try to convert the data to a .csv format
             result = True
             try:
-                csv_str = exporter.get_csv(artifact)
+                csv_str = exporter.get_csv(art)
             except Exception as ex:
                 result = False
-                errors.append(f'Could not convert {artifact}  for {self.program_id} to .csv: {str(ex)}.')
+                errors.append(f'Could not convert {art}  for {self.program_id} to .csv: {str(ex)}.')
                 return result
             # A brand-new, empty program spec may not have a 'general' tab; that's fine.
-            if csv_str is None and artifact=='general':
+            if csv_str is None and art == 'general':
                 return result
             # Write to a file if desired.
             if path is not None:
                 try:
-                    csv_path: Path = Path(path, names[artifact])
+                    csv_path: Path = Path(path, names[art])
                     with csv_path.open(mode='w') as csv_file:
                         csv_file.write(csv_str)
                 except Exception as ex:
                     result = False
-                    errors.append(f'Could not write {names[artifact]} for {self.program_id} as file: {str(ex)}')
+                    errors.append(f'Could not write {names[art]} for {self.program_id} as file: {str(ex)}')
             # Write to S3 if desirec.
             if bucket is not None:
                 try:
-                    key = f'{self.program_id}/{names[artifact]}'
-                    put_result = s3.put_object(Body=csv_str, Bucket=bucket, Key=key, Metadata=metadata)
-                    if put_result.get('ResponseMetadata', {}).get('HTTPStatusCode') != 200:
+                    s3_key = f'{self.program_id}/{names[art]}'
+                    s3_put_result = s3.put_object(Body=csv_str, Bucket=bucket, Key=s3_key, Metadata=metadata)
+                    if s3_put_result.get('ResponseMetadata', {}).get('HTTPStatusCode') != 200:
                         result = False
                         errors.append(
-                            f"Couldn't publish '{names[artifact]}' for {self.program_id} to s3 in bucket '{bucket}'.")
-                except Exception as ex:
+                            f"Couldn't publish '{names[art]}' for {self.program_id} to s3 in bucket '{bucket}'.")
+                except Exception:
                     result = False
                     errors.append(
-                        f"Couldn't publish '{names[artifact]}' for {self.program_id} to s3 in bucket '{bucket}': {traceback.format_exc()}.")
+                        f"Couldn't publish '{names[art]}' for {self.program_id} to s3 in bucket " +
+                        f"{bucket}': {traceback.format_exc()}.")
             return result
 
         if not self._opened:
@@ -151,10 +164,12 @@ class Exporter:
                     put_result = s3.put_object(Body=data, Bucket=bucket, Key=key, Metadata=metadata)
                     if put_result.get('ResponseMetadata', {}).get('HTTPStatusCode') != 200:
                         errors.append(
-                            f"Couldn't publish '{names['published']}' for {self.program_id} to s3 in bucket '{bucket}'.")
-                except Exception as ex:
+                            f"Couldn't publish '{names['published']}' for {self.program_id} " +
+                            f"to s3 in bucket '{bucket}'.")
+                except Exception:
                     errors.append(
-                        f"Couldn't publish '{names['published']}' for {self.program_id} to s3 in bucket '{bucket}': {traceback.format_exc()}.")
+                        f"Couldn't publish '{names['published']}' for {self.program_id} " +
+                        f"to s3 in bucket '{bucket}': {traceback.format_exc()}.")
 
         # Publish the individual csv files
         for artifact in [a for a in artifacts if a in CSV_ARTIFACTS]:
@@ -183,7 +198,7 @@ class Exporter:
             raise Exception("Attempt to publish an un-opened program spec.")
         return self.do_save(path=output_path)
 
-    def do_export(self, output_path: Path = None, bucket: str = None, metadata: Dict[str, str] = None) -> Tuple[
-        bool, List[str]]:
+    def do_export(self, output_path: Path = None, bucket: str = None, metadata: Dict[str, str] = None) -> \
+            Tuple[bool, List[str]]:
         self.read_from_database()
         return self.do_save(path=output_path, bucket=bucket, metadata=metadata)

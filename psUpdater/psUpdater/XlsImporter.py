@@ -9,7 +9,6 @@ import Spec
 import db
 from ImportProcessor import ImportProcessor
 from ImportValidator import Validator
-from Spec import content_sql_2_csv, recipient_sql_2_csv, deployment_sql_2_csv
 
 
 class Importer:
@@ -68,17 +67,17 @@ class Importer:
 
         try:
             additional_recipient_mappings = {'Model': 'listening_model', 'Language': 'language'}
-            self._deployments = parse_sheet(self._sheets['Deployments'], deployment_sql_2_csv)
-            self._content = parse_sheet(self._sheets['Content'], content_sql_2_csv)
+            self._deployments = parse_sheet(self._sheets['Deployments'], Spec.deployment_sql_2_csv)
+            self._content = parse_sheet(self._sheets['Content'], Spec.content_sql_2_csv)
             if 'Recipients' in self._sheets:
-                self._recipients = parse_sheet(self._sheets['Recipients'], recipient_sql_2_csv,
+                self._recipients = parse_sheet(self._sheets['Recipients'], Spec.recipient_sql_2_csv,
                                                additional_map=additional_recipient_mappings)
             elif 'Components' in self._sheets:
                 names_dict = parse_sheet(self._sheets['Components'], {'component': 'Component'})
                 names = [x['component'] for x in names_dict]
                 self._recipients = []
                 for name in names:
-                    self._recipients.extend(parse_sheet(self._sheets[name], recipient_sql_2_csv,
+                    self._recipients.extend(parse_sheet(self._sheets[name], Spec.recipient_sql_2_csv,
                                                         additional_map=additional_recipient_mappings))
 
             return True, []

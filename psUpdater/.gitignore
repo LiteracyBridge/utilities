@@ -1,3 +1,6 @@
 .popSpecEnv/
 psUpdaterEnv/
 package/
+backup/
+*.txt
+*.bin

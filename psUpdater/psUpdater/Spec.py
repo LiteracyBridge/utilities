@@ -14,7 +14,7 @@ def asdate(x: Any, default=None) -> date:
     if isinstance(x, date):
         return x.date() if isinstance(x, datetime) else x
     try:
-        datetime_pattern = re.compile(r'(\d{3}-\d{2}-\d{2})')
+        datetime_pattern = re.compile(r'(\d{2,4}-\d{2}-\d{2})')
         ymd_format = '%Y-%m-%d'
         x = datetime.strptime(datetime_pattern.search(x).group(), ymd_format).date()
     except Exception:
@@ -163,18 +163,33 @@ class Deployment:
     startdate: date
     enddate: date
     deployment: str = ''
+    deploymentname: str = ''
+    deployed: bool = None
 
+    def __eq__(self, o: object) -> bool:
+        if not isinstance(o, Deployment):
+            return False
+        op: Deployment = o
+        eq: bool = self.deploymentnumber == op.deploymentnumber and \
+                   self.startdate == op.startdate and \
+                   self.enddate == op.enddate and \
+                   self.deploymentname == op.deploymentname
+        return eq
+
+deployment_non_csv_columns = ['deployment', 'deployed']
 
 deployment_sql_2_csv = {
     'deploymentnumber': 'Deployment #',
     'startdate': 'Start Date',  # date
     'enddate': 'End Date',  # date
-    'deployment': 'Deployment Name',
+    # 'deployment': 'Deployment',
+    'deploymentname': 'Deployment Name',
 }
 deployment_required_fields: List[str] = ['deploymentnumber', 'startdate', 'enddate']
 deployment_id_fields: List[str] = ['deploymentnumber']
 deployment_fields = {x.name: (x.type, x.default) for x in fields(Deployment)}
-if list([x.name for x in fields(Deployment)]) != list(deployment_sql_2_csv.keys()):
+if list([x.name for x in fields(Deployment) if x.name not in deployment_non_csv_columns]) != list(
+        deployment_sql_2_csv.keys()):
     raise Exception('Fields from "Deployment" don\'t match "deployment_sql_2_csv".')
 if set([x.name for x in fields(Deployment) if isinstance(x.default, dataclasses._MISSING_TYPE)]) != set(
         deployment_required_fields):
@@ -320,13 +335,15 @@ class Program:
         deploymentnumber = int(deployment['deploymentnumber'])
         startdate = asdate(deployment['startdate'])
         enddate = asdate(deployment['enddate'])
-        depl = deployment.get('deployment')
+        depl = deployment.get('deploymentname')
+        deployed = str(deployment.get('deployed')).lower()[0] == 't'
         if not depl and startdate:
             depl = f"{self.program_id}-{startdate.strftime('%y')}-{deploymentnumber}"
 
         normalized = {'deploymentnumber': deploymentnumber, 'startdate': startdate, 'enddate': enddate,
-                      'deployment': depl}
-        return Deployment(**normalized)
+                      'deploymentname': depl, 'deployed': deployed}
+        _deployment = Deployment(**normalized)
+        return _deployment
 
     def __eq__(self, o: object) -> bool:
         if not isinstance(o, Program):
@@ -394,8 +411,21 @@ class DbDeployment:
     deploymentnumber: int
     startdate: date = field(default=None)
     enddate: date = field(default=None)
-    deployment: str = field(default=None)
+    deploymentname: str = field(default=None)
+    deployed: bool = field(default=None)
     db_playlists: Dict[str, DbPlaylist] = field(default_factory=dict)
+
+    def __eq__(self, o: object) -> bool:
+        global is_first
+        if not isinstance(o, DbDeployment):
+            return False
+        op: DbDeployment = o
+        eq: bool = self.deploymentnumber == op.deploymentnumber and \
+                   self.startdate == op.startdate and \
+                   self.enddate == op.enddate and \
+                   self.deploymentname == op.deploymentname and \
+                   self.db_playlists == op.db_playlists
+        return eq
 
 
 def flat_content_to_hierarchy(program_spec: Program, category_code_converter=lambda x: x) -> Dict[int, DbDeployment]:
@@ -421,9 +451,17 @@ def flat_content_to_hierarchy(program_spec: Program, category_code_converter=lam
         # Values for the database. Language is still special; get the list here, and create auxillary records later.
         language = row.get('languagecode', row.get('language', '[]'))
         # The database has both the bare sgd_target (like "3") and a sdg_target_id (like "4.3")
+        # If the caller erred by sending 'sdg_target_id == "3"', fix it.
         sdg_goal_id: str = str(content.sdg_goals) or None
         sdg_target_id: str = str(content.sdg_targets) or None
-        sdg_target: str = sdg_target_id.split('.')[1] if sdg_target_id else None
+        sdg_target: Optional[str] = None
+        if sdg_target_id:
+            parts: List[str] = sdg_target_id.split('.')
+            if parts and len(parts)>1 and parts[1]:
+                sdg_target = parts[1]
+            elif parts[0]:
+                sdg_target = parts[0]
+                sdg_target_id = f'{sdg_goal_id}.{sdg_target}'
 
         # This would be better as a string column of the category name, because user may need to disambiguate.
         default_category_code = category_code_converter(content.default_category)
@@ -439,7 +477,8 @@ def flat_content_to_hierarchy(program_spec: Program, category_code_converter=lam
 
     _db_deployments: Dict[int, DbDeployment] = {}
     for d in program_spec.deployments:
-        _db_deployments[d.deploymentnumber] = DbDeployment(d.deploymentnumber, d.startdate, d.enddate, d.deployment)
+        _db_deployments[d.deploymentnumber] = DbDeployment(d.deploymentnumber, d.startdate, d.enddate, d.deploymentname,
+                                                           d.deployed)
 
     for c in program_spec.content:
         unflatten_content(c)
@@ -455,24 +494,24 @@ def progspec_to_json(program_spec: Program) -> List[Dict]:
     :return: [ {deploymentnumber: n, playlists: [ {position: n, audience:'audience', messages: [ {...
     """
     deployments: List[Dict] = sorted([dataclasses.asdict(x) for x in
-                           flat_content_to_hierarchy(program_spec).values()], key=lambda d:d.get('deploymentnumber'))
+                                     flat_content_to_hierarchy(program_spec).values()],
+                                     key=lambda d: d.get('deploymentnumber'))
     for depl in deployments:
-        playlists = sorted([x for x in depl['db_playlists'].values()], key=lambda pl:pl.get('position'))
+        playlists = sorted([x for x in depl['db_playlists'].values()], key=lambda pl: pl.get('position'))
         del depl['db_playlists']
         for pl in playlists:
-            pl['messages'] = sorted(pl['db_messages'], key=lambda m:m.get('position'))
+            pl['messages'] = sorted(pl['db_messages'], key=lambda m: m.get('position'))
             del pl['db_messages']
         depl['playlists'] = playlists
     return deployments
 
 
-
-def progspec_from_json(programid: str, progspec_data: Union[List,Dict]) -> Program:
+def progspec_from_json(programid: str, progspec_data: Union[List, Dict]) -> Program:
     def content_from_hierarchy(deployment_num: int, pl: Dict) -> None:
         playlist_title = pl.get('title')
         if playlist_title:
             audience = pl.get('audience')
-            messages = sorted([msg for msg in pl.get('messages') if msg.get('title')], key=lambda m:m.get('position'))
+            messages = sorted([msg for msg in pl.get('messages') if msg.get('title')], key=lambda m: m.get('position'))
             for msg in messages:
                 message_title = msg.get('title')
                 key_points = msg.get('key_points')
@@ -501,10 +540,12 @@ def progspec_from_json(programid: str, progspec_data: Union[List,Dict]) -> Progr
 
     def deployment_from_hierarchy(depl: Dict) -> None:
         deploymentnumber = depl.get('deploymentnumber')
-        result.add_deployment({k:v for k,v in depl.items() if k in deployment_fields.keys()})
+        result.add_deployment({k: v for k, v in depl.items() if k in deployment_sql_2_csv.keys()})
         for pl in depl.get('playlists'):
             content_from_hierarchy(deploymentnumber, pl)
 
+    # Examine the input data. It could be a dict {deployments: [depl1, depl2, ...], recipients: [recip1, recip2,...]}
+    # or it could be a list [depl1, depl2, ...] or [recip1, recip2, ...].
     deployments = None
     recipients = None
     if isinstance(progspec_data, dict):
@@ -516,7 +557,6 @@ def progspec_from_json(programid: str, progspec_data: Union[List,Dict]) -> Progr
             deployments = progspec_data
         elif 'communityname' in item:
             recipients = progspec_data
-
 
     result: Program = Program(programid)
     if deployments:

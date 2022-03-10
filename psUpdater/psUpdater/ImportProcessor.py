@@ -8,10 +8,8 @@ from typing import Dict, List, Optional, Any
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-import db
-
 import Spec
-from Spec import Recipient
+import db
 
 # Helpers for tracking differences between .csv to database.
 Diff = namedtuple("Diff", "sql csv")
@@ -75,7 +73,7 @@ class ImportProcessor:
         languages = set()
         regions = set()
         listening_models = set()
-        recip: Recipient
+        recip: Spec.Recipient
         for recip in self._program.recipients:
             languages.add(recip.language)
             regions.add(recip.region)
@@ -105,7 +103,7 @@ class ImportProcessor:
         print(f'{result.rowcount} new programs record for {self.program_id}.')
 
     def _merge_recipients(self):
-        def differ(db_row, csv_row: Recipient) -> bool:
+        def differ(db_row, csv_row: Spec.Recipient) -> bool:
             return _rows_differ(dict(db_row), csv_row,
                                 required_columns=Spec.recipient_required_fields, ignored_columns=deprecated_columns,
                                 diffs=diffs)
@@ -115,7 +113,7 @@ class ImportProcessor:
         deprecated_columns = ['affiliate', 'partner', 'component']
 
         # Recipients from the spreadsheet w/o recipientid are to be added. Those w/ should be checked for update.
-        csv_recips: Dict[str, Recipient] = {}
+        csv_recips: Dict[str, Spec.Recipient] = {}
         updates = []
         additions = []
         for r in self._program.recipients:
@@ -144,7 +142,7 @@ class ImportProcessor:
             print(d)
 
         # Add the new recipients
-        field_names = [x.name for x in dataclasses.fields(Recipient)]
+        field_names = [x.name for x in dataclasses.fields(Spec.Recipient)]
         if len(additions) > 0:
             command_a = text(f'INSERT INTO recipients (project,{",".join(field_names)}) '
                              f'VALUES (:project,:{",:".join(field_names)});')
@@ -180,7 +178,8 @@ class ImportProcessor:
             :return: True if we should update the database from the new data.
             """
             return _rows_differ(self._program.make_deployment(dict(db_row)), csv_row,
-                                required_columns=Spec.deployment_required_fields, ignored_columns=['deployment'], diffs=diffs)
+                                required_columns=Spec.deployment_required_fields, ignored_columns=['deployment'],
+                                diffs=diffs)
 
         # [ { column: (sql: 'sql_v', csv: 'csv_v') } ]
         diffs: List[Dict[str, Any]] = []
@@ -194,9 +193,12 @@ class ImportProcessor:
         csv_deployments: Dict[int, Spec.Deployment] = {d.deploymentnumber: d for d in self._program.deployments}
         updates = []
         additions = []
+        depl: Spec.Deployment
         for num, depl in csv_deployments.items():
             if num not in db_deployments:
-                additions.append({'program_id': self.program_id, 'deployment': depl.deployment,
+                deployment = f'{self.program_id}-{depl.startdate.year % 100}-{num}'
+                additions.append({'program_id': self.program_id, 'deployment': deployment,
+                                  'deploymentname': depl.deploymentname,
                                   'deploymentnumber': num, 'startdate': depl.startdate, 'enddate': depl.enddate})
             else:
                 depl_id: Optional[int] = None
@@ -204,13 +206,14 @@ class ImportProcessor:
                     depl_id = db_deployments[num]['id']
                     self._ids[num] = depl_id
                 if differ(db_deployments[num], depl):
-                    updates.append({'program_id': self.program_id, 'deploymentnumber': num,
-                                    'startdate': depl.startdate, 'enddate': depl.enddate,
+                    updates.append({'program_id': self.program_id, 'deploymentname': depl.deploymentname,
+                                    'deploymentnumber': num, 'startdate': depl.startdate, 'enddate': depl.enddate,
                                     'id': depl_id})
 
         if len(additions) > 0:
-            command_a = text('INSERT INTO deployments (project, deployment, deploymentnumber, startdate, enddate) '
-                             'VALUES (:program_id, :deployment, :deploymentnumber, :startdate, :enddate);')
+            command_a = text(
+                'INSERT INTO deployments (project, deployment, deploymentname, deploymentnumber, startdate, enddate) '
+                'VALUES (:program_id, :deployment, :deploymentname, :deploymentnumber, :startdate, :enddate);')
             result_a = self._connection.execute(command_a, additions)
             print(f'{result_a.rowcount} deployment records added for {self.program_id}.')
             # Query the deployments after the insert, and get the ids of the newly added rows.
@@ -222,12 +225,12 @@ class ImportProcessor:
 
         if len(updates) > 0:
             if self._use_deployment_ids:
-                command_u = text('UPDATE deployments SET project=:program_id, '
+                command_u = text('UPDATE deployments SET project=:program_id, deploymentname=:deploymentname, '
                                  'deploymentnumber=:deploymentnumber, startdate=:startdate, enddate=:enddate '
                                  'WHERE id=:id;')
             else:
                 command_u = text(
-                    'UPDATE deployments SET startdate=:startdate, enddate=:enddate '
+                    'UPDATE deployments SET startdate=:startdate, enddate=:enddate, deploymentname=:deploymentname'
                     'WHERE project=:program_id AND deploymentnumber=:deploymentnumber;')
             result_u = self._connection.execute(command_u, updates)
             print(f'{result_u.rowcount} deployment records updated for {self.program_id}.')
@@ -332,10 +335,10 @@ class ImportProcessor:
 
         self._deployments_with_content = [n for n, depl in self._db_deployments.items() if len(depl.db_playlists) > 0]
 
-        if content_only:
-            missing = self._get_deployment_ids()
-            if len(missing) > 0:
-                raise Exception(f'Missing deployment(s) for content: {", ".join([str(x) for x in missing])}')
+        # if content_only:
+        #     missing = self._get_deployment_ids()
+        #     if len(missing) > 0:
+        #         raise Exception(f'Missing deployment(s) for content: {", ".join([str(x) for x in missing])}')
 
         command = text('SELECT * FROM content WHERE project=:program_id;')
         values = {'program_id': self.program_id}
@@ -348,8 +351,7 @@ class ImportProcessor:
         values = {'program_id': self.program_id}
         self._connection.execute(command, values)
 
-        if not content_only:
-            self._ensure_deployments_and_get_ids()
+        self._ensure_deployments_and_get_ids()
         self._save_content()
 
         command = text('SELECT * FROM content WHERE project=:program_id;')
@@ -366,9 +368,9 @@ class ImportProcessor:
 
     def update_db_program_spec(self, db_connection: Connection, content_only: bool = False,
                                remove_empty_deployments: bool = False):
+        def cc_converter(c):
+            return self._get_category_code(c)
         self._connection = db_connection
         # split the "Content" into Playlists and Messages. Delete all the playlists & messages, and re-add them.
-        self._db_deployments = Spec.flat_content_to_hierarchy(self._program,
-                                                              category_code_converter=lambda c: self._get_category_code(
-                                                                  c))
+        self._db_deployments = Spec.flat_content_to_hierarchy(self._program, category_code_converter=self._get_category_code)
         return self._update_database(content_only=content_only)

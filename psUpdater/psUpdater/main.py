@@ -9,9 +9,9 @@ from sqlalchemy.engine import Engine
 import XlsExporter
 import XlsImporter
 import db
-from SpecCompare import SpecCompare
-from psUpdater import Spec
-from psUpdater.SpecHandler import lambda_router
+import SpecCompare
+import Spec
+import SpecHandler
 
 engine: Optional[Engine] = None
 
@@ -304,12 +304,12 @@ def do_handler():
             'httpMethod': 'GET',
         }
         context = {}
-        result = lambda_router(event, context)
+        result = SpecHandler.lambda_router(event, context)
         print(result)
 
 def do_test():
     global args
-    from psUpdater import testdata
+    import testdata
 
     testdata.init(args, engine=engine)
     testdata.run_tests(args.test)

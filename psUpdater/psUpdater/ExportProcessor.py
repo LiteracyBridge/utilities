@@ -1,14 +1,13 @@
 import csv
 import dataclasses
 from io import BytesIO, StringIO
-from typing import List, Set, Dict, Any, Optional
+from typing import List, Set, Dict, Any, Optional, Tuple, Union
 
 from openpyxl.styles import Alignment, Font
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 import Spec
-from Spec import content_sql_2_csv, recipient_sql_2_csv, deployment_sql_2_csv, general_sql_2_csv
 
 
 class ExportProcessor:
@@ -84,7 +83,7 @@ class ExportProcessor:
             cell.font = bold
 
     @staticmethod
-    def _add_sheet(wb: Workbook, sheet_name: str, values: List[dataclasses.dataclass],
+    def _add_sheet(wb: Workbook, sheet_name: str, values: List[Union[dict, dataclasses.dataclass]],
                    header: List[str]) -> Worksheet:
         """
         Adds one sheet to the workbook, for 'content', 'recipients', etc.
@@ -97,16 +96,26 @@ class ExportProcessor:
         ws = wb.create_sheet(sheet_name)
         ws.append(list(header))
         for row in values:
-            ws.append(dataclasses.astuple(row))
+            if dataclasses.is_dataclass(row):
+                tup = dataclasses.astuple(row)
+            else:
+                tup = tuple(row.values())
+            ws.append(tup)
         return ws
 
     def _save_general(self, wb: Workbook) -> Worksheet:
         # If the program hasn't yet been fully initialized, there may not be the data for a "general" sheet.
         if self.program_spec._program is not None:
             ws = self._add_sheet(wb, sheet_name='General', values=[self.program_spec.program],
-                                 header=general_sql_2_csv.values())
+                                 header=Spec.general_sql_2_csv.values())
             self._auto_width(ws)
             return ws
+
+    def _get_deployments(self) -> Tuple[List[str], List[Dict[str, str]]]:
+        columns = Spec.deployment_sql_2_csv.values()
+        values = [{k: v for k, v in dataclasses.asdict(x).items() if k in Spec.deployment_sql_2_csv} for x in
+                  self.program_spec.deployments]
+        return columns, values
 
     def _save_deployments(self, wb: Workbook) -> Worksheet:
         """
@@ -114,8 +123,8 @@ class ExportProcessor:
         :param wb: The workbook to receive the sheet.
         :return: The new worksheet.
         """
-        columns = deployment_sql_2_csv.values()
-        ws = self._add_sheet(wb, sheet_name='Deployments', values=self.program_spec.deployments, header=columns)
+        columns, values = self._get_deployments()
+        ws = self._add_sheet(wb, sheet_name='Deployments', values=values, header=columns)
         formats = {c: {'date': True} for c in self.pxl_columns_for(['Start Date', 'End Date'], columns=columns)}
         self._auto_width(ws, formats=formats)
         return ws
@@ -126,7 +135,7 @@ class ExportProcessor:
         :param wb: The workbook to receive the sheet.
         :return: The new worksheet.
         """
-        columns = content_sql_2_csv.values()
+        columns = Spec.content_sql_2_csv.values()
         ws = self._add_sheet(wb, sheet_name='Content', values=self.program_spec.content, header=columns)
         formats = {c: {'max_width': 60, 'wrap': True} for c in
                    self.pxl_columns_for(["Message Title", "Key Points"], columns=columns)}
@@ -139,17 +148,21 @@ class ExportProcessor:
         :param wb: The workbook to receive the sheet.
         :return: The new worksheet.
         """
-        columns = recipient_sql_2_csv.values()
+        columns = Spec.recipient_sql_2_csv.values()
         ws = self._add_sheet(wb, sheet_name='Recipients', values=self.program_spec.recipients, header=columns)
         self._auto_width(ws)
         return ws
 
-    def _get_csv(self, rows: List[dataclasses.dataclass], name: str, header: List[str]) -> str:
+    def _get_csv(self, rows: List[Union[dict, dataclasses.dataclass]], name: str, header: List[str]) -> str:
         csv_io = StringIO()
         writer = csv.writer(csv_io)
         writer.writerow(header)
         for row in rows:
-            writer.writerow(dataclasses.astuple(row))
+            if dataclasses.is_dataclass(row):
+                tup = dataclasses.astuple(row)
+            else:
+                tup = tuple(row.values())
+            writer.writerow(tup)
         csv_str = csv_io.getvalue()
         return csv_str
 
@@ -178,12 +191,13 @@ class ExportProcessor:
         :return: The tab, as a .csv, as a string.
         """
         if artifact == 'general' and self.program_spec.program is not None:
-            return self._get_csv([self.program_spec.program], 'general', general_sql_2_csv.keys())
+            return self._get_csv([self.program_spec.program], 'general', Spec.general_sql_2_csv.keys())
         elif artifact == 'deployments':
-            return self._get_csv(self.program_spec.deployments, 'deployments', deployment_sql_2_csv.keys())
+            columns, values = self._get_deployments()
+            return self._get_csv(values, 'deployments', columns)
         elif artifact == 'content':
-            return self._get_csv(self.program_spec.content, 'content', content_sql_2_csv.keys())
+            return self._get_csv(self.program_spec.content, 'content', Spec.content_sql_2_csv.keys())
         elif artifact == 'recipients':
-            return self._get_csv(self.program_spec.recipients, 'recipients', recipient_sql_2_csv.keys())
+            return self._get_csv(self.program_spec.recipients, 'recipients', Spec.recipient_sql_2_csv.keys())
         else:
             return None

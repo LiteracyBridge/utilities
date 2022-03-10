@@ -3,18 +3,15 @@ from typing import Optional, List
 
 import boto3
 from amplio.utils.AmplioLambda import *
-
 from sqlalchemy.engine import Engine
+
 import Spec
 import SpecCompare
-from Spec import Program
+import XlsExporter
+import XlsImporter
+import db
 from ImportProcessor import ImportProcessor
 from XlsExporter import Exporter
-
-print("Importing db, then XlsImporter")
-import db
-import XlsImporter
-import XlsExporter
 
 print('SpecHandler loading.')
 
@@ -220,6 +217,7 @@ def get_content(programid: QueryStringParam):
     content = Spec.progspec_to_json(exporter.program_spec)
     return content
 
+
 @NeedsRole('AD,PM')
 def put_content(programid: QueryStringParam, data: JsonBody, return_diff: QueryStringParam = False):
     """
@@ -232,7 +230,7 @@ def put_content(programid: QueryStringParam, data: JsonBody, return_diff: QueryS
     print(f'put content for {programid}, data: {data}')
     engine: Engine = db.get_db_engine()
     return_diff: bool = _bool_arg(return_diff)
-    new_spec: Program = Spec.progspec_from_json(programid, data)
+    new_spec: Spec.Program = Spec.progspec_from_json(programid, data)
 
     diffs = None
     if return_diff:
@@ -251,6 +249,7 @@ def put_content(programid: QueryStringParam, data: JsonBody, return_diff: QueryS
         if return_diff:
             result['updates'] = diffs
         return result
+
 
 # @handler(roles='AD,PM')
 @NeedsRole('AD,PM')
@@ -273,6 +272,7 @@ def upload_handler(data: BinBody, programid: QueryStringParam, email: Claim, ret
         _delete_versions(key, versions_to_keep=put_result.get('VersionId'))
         result = {'status': STATUS_OK}
         if return_diff:
+            # noinspection PyTypeChecker
             diff_result = compare_handler(programid, 'published', 'pending')
             if diff_result.get('status') == STATUS_OK:
                 result['diff'] = diff_result.get('diff')
@@ -290,7 +290,7 @@ def compare_handler(programid: QueryStringParam, v1: QueryStringParam, v2: Query
         ok, errors, importer = _open_program_spec_from_s3(programid=programid, name=PENDING_PROGSPEC_KEY)
         try:
             ps = importer.program_spec
-        except Exception as ex:
+        except Exception:
             ps = None
         return ok, errors, ps
 
@@ -299,7 +299,7 @@ def compare_handler(programid: QueryStringParam, v1: QueryStringParam, v2: Query
         ok, errors, importer = _open_program_spec_from_s3(programid=programid, name=PUBLISHED_PROGSPEC_KEY)
         try:
             ps = importer.program_spec
-        except Exception as ex:
+        except Exception:
             ps = None
         return ok, errors, ps
 
@@ -314,7 +314,6 @@ def compare_handler(programid: QueryStringParam, v1: QueryStringParam, v2: Query
         ok1, errors1, ps1 = get_published()
     elif v1 == 'unpublished':
         ps1 = get_unpublished()
-        ok1 = True
     else:
         ok1, errors1, ps1 = get_pending()
 
@@ -322,7 +321,6 @@ def compare_handler(programid: QueryStringParam, v1: QueryStringParam, v2: Query
         ok2, errors2, ps2 = get_published()
     elif v2 == 'unpublished':
         ps2 = get_unpublished()
-        ok2 = True
     else:
         ok2, errors2, ps2 = get_pending()
 
@@ -339,7 +337,8 @@ def accept_handler(programid: QueryStringParam, email: Claim, comment: QueryStri
     original_publish = publish
     publish = _bool_arg(publish)
     print(
-        f'Accept pending program spec for program {programid} by {email}. Publish: {publish} (orig: {original_publish}).')
+        f'Accept pending program spec for program {programid} by {email}. ' +
+        f'Publish: {publish} (orig: {original_publish}).')
     pending_key = _program_key(programid, PENDING_PROGSPEC_KEY)
     ok, errors, importer = _open_program_spec_from_s3(programid=programid, key=pending_key)
     engine: Engine = db.get_db_engine()
@@ -489,7 +488,6 @@ def lambda_router(event, context):
     the_router = LambdaRouter(event, context, handlers=PROGSPEC_HANDLERS)
     action = the_router.pathParam(0)
     return the_router.dispatch(action)
-
 
 # def lambda_router(event, context, action: str = path_param(0)):
 #     if action == 'upload':

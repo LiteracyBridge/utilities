@@ -2,7 +2,6 @@ from dataclasses import asdict
 from typing import List, Dict
 
 import Spec
-from Spec import Program
 
 
 def _pr_val(x) -> str:
@@ -26,10 +25,10 @@ def _pr_diff(a, b) -> str:
     return f"{_pr_val(a)} -> {_pr_val(b)}"
 
 
-class SpecCompare():
-    def __init__(self, a: Program, b: Program):
-        self.a: Program = a
-        self.b: Program = b
+class SpecCompare:
+    def __init__(self, a: Spec.Program, b: Spec.Program):
+        self.a: Spec.Program = a
+        self.b: Spec.Program = b
 
     def diff_deployments(self) -> List[str]:
         """
@@ -39,14 +38,15 @@ class SpecCompare():
 
         def list_depl(d: Spec.Deployment, delta: str) -> None:
             d_dict = asdict(d)
-            values = [f'{k}: {_pr_val(d_dict[k])}' for k in d_dict.keys() if k != 'deploymentnumber']
+            values = [f'{k}: {_pr_val(d_dict[k])}' for k in d_dict.keys() if
+                      k != 'deploymentnumber' and k in Spec.deployment_sql_2_csv]
             results.append(f' Deployment # {d.deploymentnumber} {delta}: {", ".join(values)}')
 
         def diff_depl(a: Spec.Deployment, b: Spec.Deployment) -> None:
-            a_dict = asdict(a)
-            b_dict = asdict(b)
-            changed: List[str] = [f for f in a_dict.keys() if a_dict[f] != b_dict[f]]
-            changes = [f"{x}: {_pr_diff(a_dict[x], b_dict[x])}" for x in changed]
+            a_d = asdict(a)
+            b_d = asdict(b)
+            depls_changed: List[str] = [f for f in a_d.keys() if f in Spec.deployment_sql_2_csv and a_d[f] != b_d[f]]
+            changes = [f"{x}: {_pr_diff(a_d[x], b_d[x])}" for x in depls_changed]
             results.append(f' Deployment # {a.deploymentnumber} changed: {", ".join(changes)}')
 
         # Ensure that the deployments are compared in deployment-number order.
@@ -85,26 +85,27 @@ class SpecCompare():
             results.append(f' Recipient {r.recipientid} "{fullname}" {delta}: {", ".join(values)}')
 
         def diff_recip(a: Spec.Recipient, b: Spec.Recipient) -> None:
-            a_dict = asdict(a)
-            b_dict = asdict(b)
-            changed: List[str] = [f for f in a_dict.keys() if a_dict[f] != b_dict[f]]
-            changes = [f"{x}: {_pr_diff(a_dict[x], b_dict[x])}" for x in changed]
-            fullname = '/'.join([a_dict[n] for n in ['communityname', 'groupname', 'agent'] if a_dict[n]])
+            a_d = asdict(a)
+            b_d = asdict(b)
+            recips_changed: List[str] = [f for f in a_d.keys() if a_d[f] != b_d[f]]
+            changes = [f"{x}: {_pr_diff(a_d[x], b_d[x])}" for x in recips_changed]
+            fullname = '/'.join([a_d[n] for n in ['communityname', 'groupname', 'agent'] if a_d[n]])
             results.append(f' Recipient {a.recipientid} "{fullname}" changed: {", ".join(changes)}')
 
         a_dict: Dict[str, Spec.Recipient] = {r.recipientid: r for r in self.a.recipients}
         b_dict: Dict[str, Spec.Recipient] = {r.recipientid: r for r in self.b.recipients}
-        added: List[str] = [id for id in b_dict.keys() if id not in a_dict]
-        removed: List[str] = [id for id in a_dict.keys() if id not in b_dict]
-        changed: List[str] = [id for id in a_dict.keys() if id in b_dict and a_dict[id] != b_dict[id]]
+        added: List[str] = [recip_id for recip_id in b_dict.keys() if recip_id not in a_dict]
+        removed: List[str] = [recip_id for recip_id in a_dict.keys() if recip_id not in b_dict]
+        changed: List[str] = [recip_id for recip_id in a_dict.keys() if
+                              recip_id in b_dict and a_dict[recip_id] != b_dict[recip_id]]
 
         results: List[str] = []
-        for id in changed:
-            diff_recip(a_dict[id], b_dict[id])
-        for id in added:
-            list_recip(b_dict[id], delta='added')
-        for id in removed:
-            list_recip(a_dict[id], delta='removed from progspec')
+        for recip_id in changed:
+            diff_recip(a_dict[recip_id], b_dict[recip_id])
+        for recip_id in added:
+            list_recip(b_dict[recip_id], delta='added')
+        for recip_id in removed:
+            list_recip(a_dict[recip_id], delta='removed from progspec')
         return results
 
     def diff_content(self) -> List[str]:
@@ -128,6 +129,7 @@ class SpecCompare():
         def list_deployment(depl: Spec.DbDeployment, delta: str = '') -> None:
             """
             Deployments in the content, not from the Deployments tab.
+            :param delta: What sort of change is being listed? 'Added'? 'Removed'?
             :param depl: The deployment.
             """
             playlist: Spec.DbPlaylist
@@ -180,8 +182,8 @@ class SpecCompare():
 
         results: List[str] = []
         # These are deployments from the content tab, not the deployments tab.
-        a_deployments = Spec.flat_content_to_hierarchy(self.a)
-        b_deployments = Spec.flat_content_to_hierarchy(self.b)
+        a_deployments: Dict[int, Spec.DbDeployment] = Spec.flat_content_to_hierarchy(self.a)
+        b_deployments: Dict[int, Spec.DbDeployment] = Spec.flat_content_to_hierarchy(self.b)
         # We don't actually care about deployments added/removed here, only about the playlists targeted for
         # those deployments. When reporting these changes, we'll state them in terms of playlists.
         depls_added: List[int] = [n for n in b_deployments.keys() if n not in a_deployments]
@@ -197,20 +199,21 @@ class SpecCompare():
 
         return results
 
-    def diff(self, content_only:bool = False) -> List[str]:
+    def diff(self, content_only: bool = False) -> List[str]:
         result: List[str] = []
-        if not content_only:
-            changes = self.diff_deployments()
-            if len(changes) > 0:
-                result.append('Deployments')
-                result.extend(changes)
-            changes = self.diff_recipients()
-            if len(changes) > 0:
-                result.append('Recipients')
-                result.extend(changes)
+        changes = self.diff_deployments()
+        if len(changes) > 0:
+            result.append('Deployments')
+            result.extend(changes)
         changes = self.diff_content()
         if len(changes) > 0:
             result.append('Content')
             result.extend(changes)
+
+        if not content_only:
+            changes = self.diff_recipients()
+            if len(changes) > 0:
+                result.append('Recipients')
+                result.extend(changes)
 
         return result

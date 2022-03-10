@@ -12,3 +12,5 @@ layersTestClient/
 cognitoLogin/
 package/
 pythonScratchProject/
+*.md
+*.txt
