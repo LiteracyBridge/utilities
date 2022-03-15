@@ -335,13 +335,14 @@ class Program:
         deploymentnumber = int(deployment['deploymentnumber'])
         startdate = asdate(deployment['startdate'])
         enddate = asdate(deployment['enddate'])
-        depl = deployment.get('deploymentname')
+        deplname = deployment.get('deploymentname')
+        depl = deployment.get('deployment', '')
         deployed = str(deployment.get('deployed')).lower()[0] == 't'
-        if not depl and startdate:
-            depl = f"{self.program_id}-{startdate.strftime('%y')}-{deploymentnumber}"
+        if not deplname and startdate:
+            deplname = f"{self.program_id}-{startdate.strftime('%y')}-{deploymentnumber}"
 
         normalized = {'deploymentnumber': deploymentnumber, 'startdate': startdate, 'enddate': enddate,
-                      'deploymentname': depl, 'deployed': deployed}
+                      'deploymentname': deplname, 'deployed': deployed, 'deployment': depl}
         _deployment = Deployment(**normalized)
         return _deployment
 

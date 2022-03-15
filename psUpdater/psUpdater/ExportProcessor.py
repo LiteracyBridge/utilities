@@ -111,9 +111,14 @@ class ExportProcessor:
             self._auto_width(ws)
             return ws
 
-    def _get_deployments(self) -> Tuple[List[str], List[Dict[str, str]]]:
-        columns = Spec.deployment_sql_2_csv.values()
-        values = [{k: v for k, v in dataclasses.asdict(x).items() if k in Spec.deployment_sql_2_csv} for x in
+    def _get_deployments(self, for_csv:bool = False) -> Tuple[List[str], List[Dict[str, str]]]:
+        if for_csv:
+            columns = list(Spec.deployment_sql_2_csv.keys()) + ['deployment']
+            values = [{k: v for k, v in dataclasses.asdict(x).items() if k in columns} for x in
+                  self.program_spec.deployments]
+        else:
+            columns = Spec.deployment_sql_2_csv.values()
+            values = [{k: v for k, v in dataclasses.asdict(x).items() if k in Spec.deployment_sql_2_csv} for x in
                   self.program_spec.deployments]
         return columns, values
 
@@ -193,7 +198,7 @@ class ExportProcessor:
         if artifact == 'general' and self.program_spec.program is not None:
             return self._get_csv([self.program_spec.program], 'general', Spec.general_sql_2_csv.keys())
         elif artifact == 'deployments':
-            columns, values = self._get_deployments()
+            columns, values = self._get_deployments(for_csv=True)
             return self._get_csv(values, 'deployments', columns)
         elif artifact == 'content':
             return self._get_csv(self.program_spec.content, 'content', Spec.content_sql_2_csv.keys())
