@@ -1,5 +1,5 @@
 venv
-package
+package*/
 __pycache__
 .vscode
 .queryHelperEnv/

@@ -2,70 +2,21 @@
 import base64
 import csv
 import io
-import json
 import time
 
 import boto3
 import psycopg2
 from amplio.rolemanager import manager
+from amplio.utils.AmplioLambda import *
 from botocore.exceptions import ClientError
 
 # import requests
-from utils.SimpleQueryValidator import SimpleQueryValidator, QueryColumn
+from utils.SimpleQueryValidator import SQV2
 
 db_connection = None
 debug = False
 
 manager.open_tables()
-
-
-class TableAccessChecker:
-    def __init__(self, event):
-        self._email = ''
-        # self._edit = ''
-        # self._view = 'DEMO'
-        if 'requestContext' in event and 'authorizer' in event['requestContext']:
-            claims = event['requestContext']['authorizer'].get('claims', {})
-            self._email = claims.get('email')
-            # roles_str = manager.get_roles_for_user_in_program(email, program)
-            # print('Roles for {} in {}: {}'.format(email, program, roles_str))
-            # return manager.Roles.PM_ROLE in roles_str
-            # return roles_str is not None and len(roles_str) > 0
-            #
-            print('claims: {}'.format(claims))
-            # self._edit = claims.get('edit', '')
-            # self._view = claims.get('view', 'DEMO')
-        else:
-            print('No claims!')
-
-    def can_view(self, program):
-        roles_str = manager.get_roles_for_user_in_program(self._email, program)
-        print('Roles for {} in {}: {}'.format(self._email, program, roles_str))
-        return manager.Roles.ADMIN_ROLE in roles_str or manager.Roles.PM_ROLE in roles_str or \
-               manager.Roles.CONTENT_OFFICER_ROLE in roles_str or manager.Roles.FIELD_OFFICER_ROLE in roles_str
-        # return roles_str is not None and len(roles_str) > 0
-        # return re.match(self._view, project) or re.match(self._edit, project)
-
-    def can_edit(self, program):
-        roles_str = manager.get_roles_for_user_in_program(self._email, program)
-        print('Roles for {} in {}: {}'.format(self._email, program, roles_str))
-        return manager.Roles.ADMIN_ROLE in roles_str or manager.Roles.PM_ROLE in roles_str
-        # return roles_str is not None and len(roles_str) > 0
-        # return re.match(self._edit, project)
-
-
-accessChecker = TableAccessChecker('')
-
-# The event object includes:
-# ['requestContext']['authorizer']['claims'] with values
-#    admin: true/false, based on user
-#    edit:  regex of projects user can edit
-#    view:  regex of projects user can view
-#    email: email address of user
-#      sub: appears to be the unique cognito user id.
-
-
-aggregations = {'sum': 'sum(', 'count': 'count(distinct '}
 
 # A map of the columns that the user may request.
 choosable_columns = [
@@ -101,7 +52,7 @@ choosable_columns = [
     'duration_seconds',
     'position',
 
-    'timestamp', # == stats_timestamp
+    'timestamp',  # == stats_timestamp
     'deployment_timestamp',
 
     'played_seconds',
@@ -113,14 +64,6 @@ choosable_columns = [
 
     'tbcdid'
 ]
-
-implied_columns = {
-    # 'agent': ('communityname', 'groupname', 'agent'),
-    # 'groupname': ('communityname', 'groupname'),
-    'recipient': ('communityname', 'groupname', 'agent'),
-    'deployment': ('deploymentnumber', 'deployment'),
-    'startdate': ('deploymentnumber', 'startdate')
-}
 
 view_query = '''
 CREATE OR REPLACE TEMP VIEW temp_usage AS (
@@ -208,55 +151,21 @@ def make_db_connection():
     db_connection = psycopg2.connect(connect_string)
 
 
-def get_usage_params(request):
-    params = {}
-    args = request.get('args', [])
-    kwargs = request.get('kwargs', {})
-
-    # Default query if none specified
-    params['cols'] = kwargs.get('cols', 'deploymentnumber,startdate,category,sum(completions),sum(played_seconds)')
-    params['project'] = args[0] if len(args) > 0 else 'DEMO'
-    params['deployment'] = args[1] if len(args) > 1 else None
-
-    sqv = SimpleQueryValidator(choosable_columns)
-    # Always include sum(completions) and sum(played_seconds). If these aren't included in the query from the user,
-    # we'll add them later.
-    cpl = QueryColumn(column='completions', agg='sum')
-    seconds = QueryColumn(column='played_seconds', agg='sum')
-    # Parse the user's query.
-    parsed = sqv.parse(params['cols'])
-    # If there was an error parsing, that'll be the result returned. Otherwise build the SQL query.
-    if isinstance(parsed, str):
-        params['error'] = parsed
-    else:
-        if cpl not in parsed:
-            parsed.append(cpl)
-        if seconds not in parsed:
-            parsed.append(seconds)
-        params['query'] = sqv.make_query(parsed, temp_view)
-        params['columns'] = [x.name for x in parsed]
-
-    return params
-
-
-def get_usage(request, claims):
+def get_usage(program: str, columns: str, deployment: str):
     start = time.time_ns()
-    usage_params = get_usage_params(request)
-    if 'error' in usage_params:
-        end = time.time_ns()
-        return {'error': usage_params['error'], 'msec': (end - start) / 1000000}
 
-    program = usage_params.get('program') if 'program' in usage_params else usage_params.get('project')
-    if not accessChecker.can_view(program):
-        return ({'error': 'Access denied'})
+    sqv2 = SQV2(choosable_columns, temp_view, augment='sum(completions),sum(played_seconds)')
+    query, errors = sqv2.parse(columns)
+    if errors:
+        return str(errors)
 
     make_db_connection()
     cur = db_connection.cursor()
 
     # Create a convenience view limited to the data of interest.
-    if usage_params['deployment']:
-        print('Program filter: "{}" with: {}, {}'.format(view_query_depl, program, usage_params['deployment']))
-        cur.execute(view_query_depl, (program, usage_params['deployment']))
+    if deployment:
+        print('Program filter: "{}" with: {}, {}'.format(view_query_depl, program, deployment))
+        cur.execute(view_query_depl, (program, deployment))
     else:
         cur.execute(view_query, (program,))
 
@@ -264,8 +173,8 @@ def get_usage(request, claims):
     num_rows = 0
     file_like = io.StringIO()
 
-    print('Main query: "{}"'.format(usage_params['query']))
-    cur.execute(usage_params['query'])
+    print('Main query: "{}"'.format(query))
+    cur.execute(query)
     num_columns = len(cur.description)
     writer = csv.writer(file_like, quoting=csv.QUOTE_MINIMAL)
     writer.writerow([x.name for x in cur.description])
@@ -277,116 +186,48 @@ def get_usage(request, claims):
     if debug and num_rows < 10:
         print('values: {}'.format(file_like.getvalue()))
 
-    return {'column_descriptions': {x.name: x.type_code for x in cur.description}, 'columns': usage_params['columns'],
+    return {'column_descriptions': {x.name: x.type_code for x in cur.description},
             'row_count': num_rows, 'msec': (end - start) / 1000000,
-            'query': usage_params['query'], 'values': file_like.getvalue()}
+            'query': query, 'values': file_like.getvalue()}
 
 
-# noinspection SqlResolve
-def get_projects():
-    """ Retrieve a list of projects the user can see.
-    :return: A struct {'msec': query-time, 'values': [proj, proj, ...]}
-    """
-    start = time.time_ns()
-    make_db_connection()
-    cur = db_connection.cursor()
-    cur.execute('SELECT projectcode FROM projects WHERE id>0;')
-    end = time.time_ns()
-    projects = [r[0] for r in cur if accessChecker.can_view(r[0])]
-    return {'msec': (end - start) / 1000000, 'values': projects}
-
-
-def request_from_event(event):
-    request = {'query': '', 'args': [], 'kwargs': {}}
-    if 'path' not in event:
-        request['query'] = 'projects'
-    else:
-        parts = event.get('path').split('/')[1:]
-        if len(parts) == 0:
-            request['query'] = 'projects'
-        else:
-            request['query'] = parts[0]
-            request['args'] = parts[1:]
-
-    if event.get('queryStringParameters', None):
-        request['kwargs'] = event['queryStringParameters']
-    request['event'] = event
-    return request
+@handler
+def usage(programid: str = path_param(1), deployment: str = path_param(2),
+          cols: QueryStringParam = 'deploymentnumber,startdate,category,sum(completions),sum(played_seconds)') -> Any:
+    result = get_usage(program=programid, columns=cols, deployment=deployment)
+    # A string is an error message.
+    return result, (400 if isinstance(result, str) else 200)
 
 
 def lambda_handler(event, context):
-    """Sample pure Lambda function
-
-    Parameters
-    ----------
-    event: dict, required
-        API Gateway Lambda Proxy Input Format
-
-        Event doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#api-gateway-simple-proxy-for-lambda-input-format
-
-    context: object, required
-        Lambda Context runtime methods and attributes
-
-        Context doc: https://docs.aws.amazon.com/lambda/latest/dg/python-context-object.html
-
-    Returns
-    ------
-    API Gateway Lambda Proxy Output Format: dict
-
-        Return doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
-    """
-
-    # The event object includes:
-    # ['requestContext']['authorizer']['claims'] with values
-    #    admin: true/false, based on user
-    #     edit:  regex of projects user can edit
-    #     view:  regex of projects user can view
-    #    email: email address of user
-    #      sub: appears to be the unique cognito user id.
-    # ['path'] the path of the query
-    # ['queryStringParameters'] a map of parameter names to values
-
-    global accessChecker
-    accessChecker = TableAccessChecker(event)
-    request = request_from_event(event)
-
-    claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
-
-    result = {}
-
-    # temp
-    #     if 'body-json' in request['event']:
-    #         request['query'] = 'usage'
-    # temp
-    if (debug):
-        print('Request: ' + str(request))
-
-    if request['query'] == 'projects':
-        result = get_projects()
-
-    elif request['query'] == 'usage':
-        result = get_usage(request, claims)
-
-    return {
-        "statusCode": 200,
-        "headers": {"Access-Control-Allow-Origin": "*"},
-        "body":
-            json.dumps({"result": result,
-                        "event": event
-                        })
-    }
+    the_router = LambdaRouter(event, context)
+    action = the_router.path_param(0)
+    return the_router.dispatch(action)
 
 
 if __name__ == '__main__':
+    """
+    Tests.
+    """
     debug = True
     #             claims = event['requestContext']['authorizer'].get('claims', {})
     event = {'requestContext': {'authorizer': {'claims': {'email': 'bill@amplio.org'}}},
-             'path': 'handler/usage/UNICEF-2/5',
+             'path': '/usage/LBG-COVID19/4/',
+             'pathParameters': {
+                 'proxy': 'usage/LBG-COVID19/4'
+             },
              'queryStringParameters': {
-                 'cols': 'deploymentnumber,district,deployment_uuid,count(talkingbookid),sum(played_seconds)/count(talkingbookid)as secs_per_tb'}}
+                 'cols': 'deploymentnumber,district,sum(completions),sum(played_seconds)'}}
 
     result = lambda_handler(event, None)
     body = json.loads(result['body'])
-    print("\n\nResult:")
-    print(body['result'])
+    status_code = result['statusCode']
+    print("\n\nStatus code {}\n     Result {}".format(status_code, body))
+
+    event['queryStringParameters']['cols'] = 'unknown,missing,invalid,caps(nothing)'
+    result = lambda_handler(event, None)
+    body = json.loads(result['body'])
+    status_code = result['statusCode']
+    print("\n\nStatus code {}\n     Result {}".format(status_code, body))
+
     print('Done.')

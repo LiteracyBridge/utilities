@@ -1,5 +1,4 @@
 import binascii
-import functools
 import inspect
 import json
 import re
@@ -9,7 +8,6 @@ from json import JSONEncoder
 from typing import Any, Dict, Callable, Tuple, Union
 
 import amplio.rolemanager.manager as roles_manager
-from pydantic.main import ModelMetaclass
 
 roles_manager.open_tables()
 
@@ -254,9 +252,9 @@ def _gather_params(handler: Callable, event: LambdaEvent, context: LambdaContext
         elif inspect.isfunction(param.default):
             params[param.name] = param.default(event, context)
 
-        # Is the type of the parameter a ModelMetaclass, whatever that is?
-        elif isinstance(param.annotation, ModelMetaclass):
-            params[param.name] = param.annotation.parse_obj(get_body_json())
+        # # Is the type of the parameter a ModelMetaclass, whatever that is?
+        # elif isinstance(param.annotation, ModelMetaclass):
+        #     params[param.name] = param.annotation.parse_obj(get_body_json())
 
         # Is the parameter 'event' or 'context'?
         elif (param.annotation == type(LambdaEvent()) or param.name == 'event'):
@@ -267,45 +265,28 @@ def _gather_params(handler: Callable, event: LambdaEvent, context: LambdaContext
     return params
 
 
-def router() -> Any:
+@dataclass
+class Handler():
+    function: Callable[..., Tuple[Any, int]]
+    allowed_roles: str = 'AD,PM,CO,FO'
+    get_program_id: Callable[..., str] = None
+
+
+def handler(_func=None, *, roles: str = 'AD,PM,CO,FO', get_programid: Callable[..., str] = None, action=None) -> Any:
     """
-    Helper to make it easier to write Lambda "router" functions, where a router function is called by
-    the Lambda runtime, and dispatches to one of possibly several functions, based on parameters in the
-    Lambda event. Typically the parameters will be path parameters or query string parameters, though they
-    can be from the body, or computed from the event and/or context by another helper.
+    Helper to make it easier to write Lambda "handler" functions. These may be
+    called by the Lambda runtime, or may be dispatched to from a "router"
+    function.
 
-    The router function is decorated with "@router" or "@router()". The function will probably take
-    one or more paramters for the multiple dispatch, such as "action". The function will probably need to
-    take "event" and "context" parameters, to forward on to the handlers.
+    The returned value of the decorated Callable will be JSON encoded and
+    returned as the 'body' of the response, with this important caveat: If the
+    Callable returns a tuple of length 2, and the second element in the tuble is
+    an int, the first element will be returned as the 'body', and the second
+    element will be returned as the HTTP status code.
 
-    The returned value from this router function is returned as-is to the Lambda runtime.
-    """
-
-    def decorator(handler: Callable) -> Any:
-        @functools.wraps(handler)
-        def wrapper(event: LambdaEvent, context: LambdaContext):
-            # pathParameters = event.get('pathParameters', {}).get('proxy', '').split('/')
-            # return handler(pathParameters, event, context)
-            params = _gather_params(handler, event, context)
-            return handler(**params)
-
-        return wrapper
-
-    return decorator
-
-
-def handler(roles: str = None, programid: Callable[..., str] = None) -> Any:
-    """
-    Helper to make it easier to write Lambda "handler" functions. These may be called by the Lambda
-    runtime, or may be dispatched to from a "router" function. 
-
-    The returned value of the decorated Callable will be JSON encoded and returned as the 'body' of the
-    response, with this important caveat: If the Callable returns a tuple of length 2, and the second
-    element in the tuble is an int, the first element will be returned as the 'body', and the second
-    elementn will be returned as the HTTP status code.
-
-    To return a tuple of length 2 with an int as the second element, construct a tuple with the desired
-    values, and return that as the first element, and None as the second:
+    To return a tuple of length 2 with an int as the second element, construct a
+    tuple with the desired values, and return that as the first element, and
+    None as the second:
         x = tuple({'a':'a'}, 123)
         return x, None
     Alternatively, specify the HTTP status code as the second returned element:
@@ -314,83 +295,65 @@ def handler(roles: str = None, programid: Callable[..., str] = None) -> Any:
     Parse request and response paramenters.
 
     params:
-    roles: str  Optional.  If provided, requires the user (as passed in claims) has one of the requested
-        roles in the given program.
-    programid: Callable. Optional. Used only if the 'roles' parameter is given.  If the handler takes "programid'
-        as an argument, and most will, that is used for the program. Any handler that doesn't take such a parameter
-        must provide a callable to extract the programid from the (event, context).
+    roles: str  Optional.  If provided, requires the user (as passed in claims)
+        has one of the requested roles in the given program. If not provided,
+        'AD,PM,CO,FO' is assumed, that is, any role in the program.
+    programid: Callable. Optional. Used only if 'roles' are required.
+        If the handler takes 'programid' as an argument, and most will, that is
+        used for the program. Any handler that doesn't take such a parameter
+        must provide a callable to extract the programid from the event, the
+        environment, or somewhere. NOTE: program_id, programId, and project are
+        recognized as aliases for programid.
     """
+    global LAMBDA_HANDLERS
 
-    def decorator(handler: Callable[..., Tuple[Any, int]]) -> Any:
-        @functools.wraps(handler)
-        def wrapper(event: LambdaEvent, context: LambdaContext):
-            params = _gather_params(handler, event, context)
-            if roles is not None:
-                email = event.get('requestContext', {}).get('authorizer', {}).get('claims', {}).get('email')
-                progid = params.get('programid') or programid(event, context)
-                if not roles_manager.user_has_role_in_program(email=email, program=progid, roles=roles):
-                    return response(403, {'message': 'This user does not have an appropriate role in the program'})
+    def decorator(_func: Callable[..., Tuple[Any, int]]) -> Any:
+        nonlocal action
+        action = action or _func.__name__
+        LAMBDA_HANDLERS[action] = Handler(_func, allowed_roles=roles, get_program_id=get_programid)
+        # _func.needed_roles = roles
+        return _func
 
-            result: Any = None
-            returned_value = handler(**params)
-            if isinstance(returned_value, tuple) and len(returned_value) == 2 and (
-                    isinstance(returned_value[1], int) or returned_value[1] is None):
-                result = returned_value[0]
-                status_code = returned_value[1]
-            else:
-                result = returned_value
-                status_code = None
-            # Response with body and http status code.
-            if not result:
-                return response(status_code or 404, {"error": "Not found"})
-            elif isinstance(result, Exception):
-                return exception_response(result)
+    try:
+        if LAMBDA_HANDLERS is None:
+            LAMBDA_HANDLERS = {}
+    except Exception as ex:
+        LAMBDA_HANDLERS = {}
 
-            return response(status_code or 200, result)
-
-        return wrapper
-
-    return decorator
-
-
-@dataclass
-class Handler():
-    function: Callable[..., Tuple[Any, int]]
-    get_program_id: Callable[..., str] = None
-
-
-def NeedsRole(needed_roles: str) -> Callable:
-    def decorator_needs_roles(func: Callable) -> Callable:
-        func.needed_roles = needed_roles
-        return func
-
-    return decorator_needs_roles
+    if _func is None:
+        return decorator
+    else:
+        return decorator(_func)
 
 
 class LambdaRouter():
     """
-    Class implementing a Lambda Handler helper. When provided with the event and context from a
-    Lambda event, and with a dictionary of handler functions, and with the action to be performed
-    (presumably extracted from the event), the object can dispatch the desired function with the
-    proper arguments.
-
-    Uses the INSTEDD argument decorations to describe how to obtain the function's arguments.
+    Class implementing a Lambda Handler helper. When provided with the event and
+    context from a Lambda event, and with the action to be performed (presumably
+    extracted from the event), the object can dispatch the desired function with
+    the proper arguments.
 
     Sample usage:
-        @NeedsRole('AD,PM')
+        @handler(role='AD,PM') # user must be configured with AD or PM role in the program.
+        def some_pm_function(programid: queryStringParam, data_desired: JsonBody):
+            result, http_response_code = do_pm_work(programid, data_desired)
+            return result, http_response_code
+        @handler # any role will do -- implied ('AD,PM,CO,FO')
         def some_useful_function(programid: QueryStringParam, data_desired: QueryStringParam):
             result = do_real_work(programid, data_desired)
-            return result
-        MY_HANDLERS = {'query': some_useful_function}
+            return result # implied 200
         def lambda_handler(event, context):
-            the_router = LambdaRouter(event, context, handlers=MY_HANDLERS)
-            action = the_router.pathParam(0)
+            the_router = LambdaRouter(event, context)
+            action = the_router.pathParam(0) # or however else the action is determined.
             the_router.dispatch(action)
     """
 
-    def __init__(self, event, context, handlers: Dict[str, Union[Callable, Handler]]):
+    def __init__(self, event, context, handlers: Dict[str, Union[Callable, Handler]] = None):
+        global LAMBDA_HANDLERS
         self._event = event
         self._context = context
+        if handlers is None:
+            handlers = LAMBDA_HANDLERS
         self._handlers = {n: h if isinstance(h, Handler) else Handler(h) for n, h in handlers.items()}
 
     @property
@@ -401,10 +364,10 @@ class LambdaRouter():
         return self._event.get('queryStringParameters', {}).get(name)
 
     @property
-    def pathParams(self):
+    def path_params(self):
         return self._event.get('pathParameters', {}).get('proxy', '').split('/')
 
-    def pathParam(self, index: int):
+    def path_param(self, index: int):
         params = self._event.get('pathParameters', {}).get('proxy', '').split('/')
         return params[index] if index < len(params) else None
 
@@ -414,13 +377,13 @@ class LambdaRouter():
     def _determine_programid(self, handler: Handler, params) -> str:
         if handler.get_program_id is not None:
             return handler.get_program_id(self._event, self._context)
-        for x in [n for n in ['programid', 'program_id', 'programId'] if n in params]:
+        for x in [n for n in ['programid', 'program_id', 'programId', 'project'] if n in params]:
             return params[x]
-        for x in [n for n in ['programid', 'program_id', 'programId'] if n in self.queryStringParams]:
+        for x in [n for n in ['programid', 'program_id', 'programId', 'project'] if n in self.queryStringParams]:
             return self.queryStringParams[x]
 
-    def _user_has_needed_roles(self, roles, email, programid) -> bool:
-        return roles_manager.user_has_role_in_program(email=email, program=programid, roles=roles)
+    def _user_has_allowed_role(self, allowed_roles, email, programid) -> bool:
+        return roles_manager.user_has_role_in_program(email=email, program=programid, roles=allowed_roles)
 
     def dispatch(self, action: str) -> Any:
         if action not in self._handlers:
@@ -428,12 +391,12 @@ class LambdaRouter():
         handler = self._handlers[action]
         params = _gather_params(handler.function, self._event, self._context)
         try:
-            needed_roles = handler.function.needed_roles
+            allowed_roles = handler.allowed_roles
         except Exception as ex:
-            needed_roles = None
-        if needed_roles:
+            allowed_roles = None
+        if allowed_roles:
             programid = self._determine_programid(handler, params)
-            if not self._user_has_needed_roles(needed_roles, self.claim('email'), programid):
+            if not self._user_has_allowed_role(allowed_roles, self.claim('email'), programid):
                 return response(status_code=403,
                                 body={'message': 'This user does not have an appropriate role in the program'})
 
