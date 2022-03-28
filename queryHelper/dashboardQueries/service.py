@@ -80,6 +80,39 @@ CREATE OR REPLACE TEMP VIEW temp_usage AS (
     AND deploymentnumber = %s
 );
 '''
+# noinspection SqlNoDataSourceInspection
+DEPLOYMENT_BY_COMMUNITY = '''
+SELECT DISTINCT 
+        td.project, 
+        td.deployment, 
+        d.deploymentnumber,
+        td.contentpackage as package,
+        td.recipientid, 
+        r.communityname, 
+        r.groupname,
+        r.agent,
+        r.language as languagecode,
+        d.startdate,
+        d.enddate,
+       COUNT(DISTINCT td.talkingbookid) AS deployed_tbs
+    FROM tbsdeployed td
+    JOIN recipients r
+      ON td.recipientid = r.recipientid
+    LEFT OUTER JOIN deployments d
+      ON d.project=td.project AND d.deployment ilike td.deployment
+    WHERE td.project = %s
+    GROUP BY td.project, 
+        td.deployment, 
+        package, 
+        d.deploymentnumber,
+        td.recipientid, 
+        r.communityname, 
+        r.groupname, 
+        r.agent,
+        r.language, 
+        d.startdate,
+        d.enddate
+'''
 
 temp_view = 'temp_usage'
 
@@ -141,6 +174,34 @@ def get_secret():
 
 
 # Make a connection to the SQL database
+def get_db_connection():
+    global db_connection
+    if db_connection is None:
+        secret = get_secret()
+
+        secret['dbname'] = 'dashboard'
+        connect_string = "dbname={dbname} user={username} port={port} host={host} password={password}".format(**secret)
+
+        db_connection = psycopg2.connect(connect_string)
+    return db_connection
+
+
+def query_to_csv(query: str, cursor=None, vars: Tuple = None) -> Tuple[str, int]:
+    if cursor is None:
+        cursor = get_db_connection().cursor()
+    file_like = io.StringIO()
+    num_rows = 0
+    cursor.execute(query, vars=vars)
+    num_columns = len(cursor.description)
+    writer = csv.writer(file_like, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow([x.name for x in cursor.description])
+    for record in cursor:
+        num_rows += 1
+        writer.writerow(record)
+    return file_like.getvalue(), num_rows
+
+
+# Make a connection to the SQL database
 def make_db_connection():
     global db_connection
     secret = get_secret()
@@ -198,10 +259,91 @@ def usage(programid: str = path_param(1), deployment: str = path_param(2),
     # A string is an error message.
     return result, (400 if isinstance(result, str) else 200)
 
+@handler
+def usage2(programid: QueryStringParam, deployment: QueryStringParam,
+          columns: QueryStringParam = 'deploymentnumber,startdate,category,sum(completions),sum(played_seconds)') -> Any:
+    start = time.time_ns()
+
+    sqv2 = SQV2(choosable_columns, temp_view, augment='sum(completions),sum(played_seconds)')
+    query, errors = sqv2.parse(columns)
+    if errors:
+        # http error result code
+        return str(errors), 400
+
+    get_db_connection()
+    cursor = db_connection.cursor()
+
+    # Create a convenience view limited to the data of interest.
+    if deployment:
+        print('Program filter: "{}" with: {}, {}'.format(view_query_depl, programid, deployment))
+        cursor.execute(view_query_depl, (programid, deployment))
+    else:
+        cursor.execute(view_query, (programid,))
+
+    # Run the query
+    usage, num_rows = query_to_csv(query, cursor=cursor)
+    end = time.time_ns()
+    print('{} rows in {} mSec'.format(num_rows, (end - start) / 1000000))
+    if debug and num_rows < 10:
+        print('values: {}'.format(usage))
+
+    return usage
+
+
+# noinspection SqlNoDataSourceInspection
+@handler
+def recipients(programid: QueryStringParam) -> Any:
+    # noinspection SqlResolve
+    query = 'SELECT * FROM recipients WHERE project ILIKE %s;'
+    vars = (programid,)
+    recipients, numrecips = query_to_csv(query, cursor=get_db_connection().cursor(), vars=vars)
+    print('{} recipients found for program {}'.format(numrecips, programid))
+    return recipients
+
+
+# noinspection SqlNoDataSourceInspection
+@handler
+def deployments(programid: QueryStringParam) -> Any:
+    # noinspection SqlResolve
+    query = 'SELECT * FROM deployments WHERE project ILIKE %s;'
+    vars = (programid,)
+    deployments, numdepls = query_to_csv(query, cursor=get_db_connection().cursor(), vars=vars)
+    print('{} deployments found for program {}'.format(numdepls, programid))
+    return deployments
+
+
+# noinspection SqlNoDataSourceInspection
+@handler
+def tbsdeployed(programid: QueryStringParam) -> Any:
+    # noinspection SqlResolve
+    query = '''
+    SELECT tbd.talkingbookid,tbd.recipientid,tbd.deployedtimestamp,dep.deploymentnumber,tbd.deployment,
+           tbd.contentpackage,tbd.username,tbd.tbcdid,tbd.action,tbd.newsn,tbd.testing
+      FROM tbsdeployed tbd
+      JOIN deployments dep
+        ON tbd.project=dep.project AND tbd.deployment=dep.deployment
+     WHERE tbd.project ILIKE %s
+     ORDER BY dep.deploymentnumber, tbd.recipientid;
+    '''
+    vars = (programid,)
+    tbsdeployed, numtbs = query_to_csv(query, cursor=get_db_connection().cursor(), vars=vars)
+    print('{} tbs deployed found for {}'.format(numtbs, programid))
+    return tbsdeployed
+
+# noinspection SqlNoDataSourceInspection
+@handler
+def depl_by_community(programid: QueryStringParam) -> Any:
+    # noinspection SqlResolve
+    vars = (programid,)
+    tbsdeployed, numdepls = query_to_csv(DEPLOYMENT_BY_COMMUNITY, cursor=get_db_connection().cursor(), vars=vars)
+    print('{} deployments-by-community found for {}'.format(numdepls, programid))
+    return tbsdeployed
+
 
 def lambda_handler(event, context):
     the_router = LambdaRouter(event, context)
     action = the_router.path_param(0)
+    print('Action is {}'.format(action))
     return the_router.dispatch(action)
 
 
@@ -212,9 +354,8 @@ if __name__ == '__main__':
     debug = True
     #             claims = event['requestContext']['authorizer'].get('claims', {})
     event = {'requestContext': {'authorizer': {'claims': {'email': 'bill@amplio.org'}}},
-             'path': '/usage/LBG-COVID19/4/',
              'pathParameters': {
-                 'proxy': 'usage/LBG-COVID19/4'
+                 'proxy': 'usage/TEST/1'
              },
              'queryStringParameters': {
                  'cols': 'deploymentnumber,district,sum(completions),sum(played_seconds)'}}
@@ -229,5 +370,27 @@ if __name__ == '__main__':
     body = json.loads(result['body'])
     status_code = result['statusCode']
     print("\n\nStatus code {}\n     Result {}".format(status_code, body))
+
+    event['queryStringParameters']['programid'] = 'TEST'
+    event['queryStringParameters']['deployment'] = 1
+    del event['queryStringParameters']['cols']
+    event['queryStringParameters']['columns'] = 'deploymentnumber,district,sum(completions),sum(played_seconds)'
+    event['pathParameters'] = {'proxy': 'usage2'}
+    result = lambda_handler(event, None)
+    body = json.loads(result['body'])
+    status_code = result['statusCode']
+    print("\n\nStatus code {}\n     Result {}".format(status_code, body))
+
+    event['pathParameters'] = {'proxy': 'recipients'}
+    result = lambda_handler(event, None)
+    print(result)
+
+    event['pathParameters'] = {'proxy': 'tbsdeployed'}
+    result = lambda_handler(event, None)
+    print(result)
+
+    event['pathParameters'] = {'proxy': 'depl_by_community'}
+    result = lambda_handler(event, None)
+    print(result)
 
     print('Done.')
