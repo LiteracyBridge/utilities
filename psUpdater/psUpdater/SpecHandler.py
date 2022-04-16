@@ -1,8 +1,9 @@
+import binascii
 import datetime
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 import boto3
-from amplio.utils.AmplioLambda import *
+from amplio.utils import LambdaRouter, handler, QueryStringParam, JsonBody, BinBody, Claim
 from sqlalchemy.engine import Engine
 
 import Spec
@@ -142,6 +143,7 @@ def _open_program_spec_from_s3(programid: str, name: str = None, key: str = None
 
 
 # noinspection PyUnusedLocal
+@handler(action='echo', roles='')
 def echo_handler(event, context):
     """
     Echos the parameters back. For testing.
@@ -209,7 +211,7 @@ def echo_handler(event, context):
     }
 
 
-@NeedsRole('AD,PM')
+@handler(roles='AD,PM')
 def get_content(programid: QueryStringParam):
     engine: Engine = db.get_db_engine()
     exporter = XlsExporter.Exporter(programid, engine)
@@ -218,7 +220,7 @@ def get_content(programid: QueryStringParam):
     return content
 
 
-@NeedsRole('AD,PM')
+@handler(roles='AD,PM')
 def put_content(programid: QueryStringParam, data: JsonBody, return_diff: QueryStringParam = False):
     """
     Update one or more sections of the program spec.
@@ -251,8 +253,7 @@ def put_content(programid: QueryStringParam, data: JsonBody, return_diff: QueryS
         return result
 
 
-# @handler(roles='AD,PM')
-@NeedsRole('AD,PM')
+@handler(action='upload')
 def upload_handler(data: BinBody, programid: QueryStringParam, email: Claim, return_diff: QueryStringParam = False,
                    comment: QueryStringParam = 'No comment provided'):
     return_diff = _bool_arg(return_diff)
@@ -283,7 +284,7 @@ def upload_handler(data: BinBody, programid: QueryStringParam, email: Claim, ret
         return {'status': STATUS_FAILURE, 'errors': errors}, FAILURE_RESPONSE_400
 
 
-# @handler()
+@handler(action='compare')
 def compare_handler(programid: QueryStringParam, v1: QueryStringParam, v2: QueryStringParam):
     def get_pending() -> Tuple[bool, List[str], Spec.Program]:
         # Get the pending program spec
@@ -330,8 +331,7 @@ def compare_handler(programid: QueryStringParam, v1: QueryStringParam, v2: Query
     return {'status': 'ok', 'diff': diffs}
 
 
-# @handler(roles='AD,PM')
-@NeedsRole('AD,PM')
+@handler(action='accept')
 def accept_handler(programid: QueryStringParam, email: Claim, comment: QueryStringParam = 'No comment provided',
                    publish: QueryStringParam = False):
     original_publish = publish
@@ -356,8 +356,7 @@ def accept_handler(programid: QueryStringParam, email: Claim, comment: QueryStri
     return result
 
 
-# @handler(roles='AD,PM')
-@NeedsRole('AD,PM')
+@handler(action='publish')
 def publish_handler(programid: QueryStringParam, email: Claim, comment: QueryStringParam = 'No comment provided'):
     """
     Publish the program specification from the database. Creates pub_general.csv, pub_deployments.csv,
@@ -388,8 +387,7 @@ def publish_handler(programid: QueryStringParam, email: Claim, comment: QueryStr
     return result, response_code
 
 
-# @handler(roles='AD,PM,CO')
-@NeedsRole('AD,PM,CO')
+@handler(action='download')
 def download_handler(programid: QueryStringParam, artifact: QueryStringParam, aslink: QueryStringParam, email: Claim):
     """
     Returns a program spec artifact as the bytes of a file or a link to a file in S3.
@@ -435,8 +433,7 @@ def download_handler(programid: QueryStringParam, artifact: QueryStringParam, as
         return result
 
 
-# @handler(roles='AD,PM,CO,FO')
-@NeedsRole('AD,PM,CO,FO')
+@handler(action='list')
 def list_objects(programid: QueryStringParam):
     """
     Lists the objects in the program's directory in the amplio-progspecs bucket.
@@ -460,7 +457,7 @@ def list_objects(programid: QueryStringParam):
     return result
 
 
-# @handler()
+@handler(action='validate')
 def validation_handler(data: BinBody, programid: QueryStringParam, email: Claim):
     print(f'Validate program spec for {programid}, user {email}.')
     # Check that it's a valid program spec.
@@ -485,8 +482,9 @@ PROGSPEC_HANDLERS = {'upload': upload_handler,
 
 
 def lambda_router(event, context):
-    the_router = LambdaRouter(event, context, handlers=PROGSPEC_HANDLERS)
-    action = the_router.pathParam(0)
+    the_router: LambdaRouter = LambdaRouter(event, context)#, handlers=PROGSPEC_HANDLERS)
+    action = the_router.path_param(0)
+    print(f'Request {action} by user {the_router.claim("email")or"-unknown-"} for program {the_router.queryStringParam("programid")or"None"}')
     return the_router.dispatch(action)
 
 # def lambda_router(event, context, action: str = path_param(0)):

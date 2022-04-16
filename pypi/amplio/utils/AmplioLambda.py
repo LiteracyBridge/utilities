@@ -410,7 +410,7 @@ class LambdaRouter():
             result = returned_value
             status_code = None
         # Response with body and http status code.
-        if not result:
+        if result is None:
             return response(status_code or 404, {"error": "Not found"})
         elif isinstance(result, Exception):
             return exception_response(result)
