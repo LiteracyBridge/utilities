@@ -80,6 +80,7 @@ CREATE OR REPLACE TEMP VIEW temp_usage AS (
     AND deploymentnumber = %s
 );
 '''
+# noinspection SqlDialectInspectionForFile
 # noinspection SqlNoDataSourceInspection
 DEPLOYMENT_BY_COMMUNITY = '''
 SELECT DISTINCT 
@@ -113,6 +114,8 @@ SELECT DISTINCT
         d.startdate,
         d.enddate
 '''
+
+
 
 temp_view = 'temp_usage'
 
@@ -339,6 +342,12 @@ def depl_by_community(programid: QueryStringParam) -> Any:
     print('{} deployments-by-community found for {}'.format(numdepls, programid))
     return tbsdeployed
 
+@handler(roles=None)
+def supported_languages(programid: QueryStringParam):
+    # Only global "supportedlanguages" supported at this point; per-program language support TBD
+    supported_languages, numlangs = query_to_csv('SELECT * FROM supportedlanguages;', cursor=get_db_connection().cursor())
+    print('{} supported languages'.format(numlangs))
+    return supported_languages
 
 def lambda_handler(event, context):
     the_router = LambdaRouter(event, context)
@@ -390,6 +399,11 @@ if __name__ == '__main__':
     print(result)
 
     event['pathParameters'] = {'proxy': 'depl_by_community'}
+    result = lambda_handler(event, None)
+    print(result)
+
+    event['pathParameters'] = {'proxy': 'supported_languages'}
+    event['queryStringParameters']['programid']
     result = lambda_handler(event, None)
     print(result)
 
