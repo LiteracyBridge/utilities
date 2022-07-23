@@ -1,6 +1,6 @@
 PROJECT = roleHelper
-PYTHON = python3.8
-VIRTUAL_ENV = .roleHelperEnv
+PYTHON = python3.9
+VIRTUAL_ENV = roleHelperEnv
 FUNCTION_NAME = roleHelper
 FUNCTION_HANDLER = lambda_handler
 FUNCTION_ROLE = arn:aws:iam::856701711513:role/lambda-checkout
@@ -13,7 +13,7 @@ install: virtual
 build: clean_package build_package_tmp copy_python remove_unused zip
 
 helper:
-	echo "install, update, build, clean_package, upload_lambda"
+	echo "install, update, build, clean_package, upload_lambda, update_layer"
 
 virtual:
 	@echo "--> Setup and activate virtualenv"
@@ -31,8 +31,9 @@ copy_python:
 	if test -d $(VIRTUAL_ENV)/lib; then cp -a $(VIRTUAL_ENV)/lib/$(PYTHON)/site-packages/. ./package/tmp/; fi
 	if test -d $(VIRTUAL_ENV)/lib64; then cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; fi
 
+# 	../amplio-layer/rm_layer.sh
+
 remove_unused:
-	../amplio-layer/rm_layer.sh
 	rm -rf ./package/tmp/.gitignore
 	rm -rf ./package/tmp/.idea
 	rm -rf ./package/tmp/boto3*

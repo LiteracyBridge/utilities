@@ -243,7 +243,7 @@ def get_defined_roles_for_user(email: str) -> Dict[str, Dict[str, str]]:
 
 def get_admin_objects_for_user(email: str):
     """
-    Only used in tests.
+    Populates the roles display in the dashboard.
     """
     email = _normalize_email(email)
     email_split = email.split('@')
@@ -302,9 +302,11 @@ def get_admin_objects_for_user(email: str):
         if 'parent' in org:
             result['parent'] = org['parent']
         if 'orgs' in org:
-            result['orgs'] = [flatten_org(x) for x in org['orgs'].values()]
+            # result['orgs'] = [flatten_org(x) for x in org['orgs'].values()]
+            result['orgs'] = sorted([flatten_org(x) for x in org['orgs'].values()], key=lambda o: o['name'])
         if 'programs' in org:
-            result['programs'] = list(org['programs'].values())
+            # result['programs'] = list(org['programs'].values())
+            result['programs'] = sorted(list(org['programs'].values()), key=lambda p: p['name'])
         return result
 
     result_orgs = []

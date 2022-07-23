@@ -304,6 +304,12 @@ def handler(_func=None, *, roles: str = 'AD,PM,CO,FO', get_programid: Callable[.
         must provide a callable to extract the programid from the event, the
         environment, or somewhere. NOTE: program_id, programId, and project are
         recognized as aliases for programid.
+
+    Example:
+          @handler(roles='AD,PM')
+          def get_content(programid: QueryStringParam):
+            . . .
+      See full example below.
     """
     global LAMBDA_HANDLERS
 
@@ -338,10 +344,12 @@ class LambdaRouter():
         def some_pm_function(programid: queryStringParam, data_desired: JsonBody):
             result, http_response_code = do_pm_work(programid, data_desired)
             return result, http_response_code
+
         @handler # any role will do -- implied ('AD,PM,CO,FO')
         def some_useful_function(programid: QueryStringParam, data_desired: QueryStringParam):
             result = do_real_work(programid, data_desired)
             return result # implied 200
+
         def lambda_handler(event, context):
             the_router = LambdaRouter(event, context)
             action = the_router.pathParam(0) # or however else the action is determined.
