@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Union
 
 import boto3
+import amplio
 from amplio.rolemanager.Roles import ADMIN_ROLES
 
 from utils import canonical_acm_dir_name

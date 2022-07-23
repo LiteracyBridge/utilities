@@ -148,6 +148,25 @@ def populate_postgresql(program_id: str, comment: str) -> bool:
     #     "affiliate": "",
     #     "partner": ""
     # }
+    # Here's a sample from a newly-added program:
+    #
+    # dashboard=> select * from programs where program_id = 'CRS-GH-ICO';
+    # -[ RECORD 1 ]-----------------------+-------------------------------------------------------------------------------------
+    # id                                  | 202
+    # sustainable_development_goals       | [5, 6]
+    # deployments_count                   | 1
+    # deployments_length                  | one_quarter
+    # deployments_first                   | 2022-06-01
+    # feedback_frequency                  | quarterly
+    # program_id                          | CRS-GH-ICO
+    # languages                           | ["gur", "talni", "maw"]
+    # country                             | Ghana
+    # region                              | ["North East", "Upper East"]
+    # direct_beneficiaries_map            | {"male": "Number of Male", "female": "Number of Female", "youth": "Number of Youth"}
+    # direct_beneficiaries_additional_map | {}
+    # affiliate                           |
+    # partner                             |
+    # listening_models                    | ["Groups"]
 
     connection.commit()
 
