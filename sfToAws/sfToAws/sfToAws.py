@@ -8,7 +8,7 @@ from typing import Dict, List
 import boto3
 from sqlalchemy import text
 
-from db import get_db_connection
+from db import get_db_engine, get_db_connection
 
 """
 Create an interface between Salesforce and AWS.
@@ -225,8 +225,9 @@ def read_json_from_s3(key: str, bucket: str = SF_TO_AWS_BUCKET) -> Dict[str, str
 
 def update_sql(sf_data: dict):
     def update_db(sf_data: dict):
+        get_db_engine() # will use cached copy, if available.
         with get_db_connection() as conn:
-            transaction = conn.begin()
+            # transaction = conn.begin()
             updates = [{'program_id': sf_data['program_id'],
                         # set to provided tableau_id, or to empty string.
                         'tableau_id': (sf_data.get('tableau_id', ''))}]
@@ -236,11 +237,16 @@ def update_sql(sf_data: dict):
                              f'= row(:{",:".join(field_names)}) WHERE program_id=:program_id;')
             result_u = conn.execute(command_u, updates)
             print(f'{result_u.rowcount} program records updated.')
+            if result_u.rowcount == 0:
+                msg = f'tableau_id not updated for program {sf_data.get("program_id")}, salesforce_id {sf_data.get("salesforce_id")}'
+                print(msg)
+                email_text.append(msg)
 
-            command_q = text('SELECT * FROM programs WHERE program_id = :program_id')
-            result_q = conn.execute(command_q, updates)
-            transaction.rollback()
+            # command_q = text('SELECT * FROM programs WHERE program_id = :program_id')
+            # result_q = conn.execute(command_q, updates)
+            # transaction.rollback()
 
+    global email_text
     # We need program_id to update SQL.
     if 'program_id' not in sf_data:
         return
