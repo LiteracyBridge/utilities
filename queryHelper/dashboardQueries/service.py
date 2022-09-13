@@ -3,6 +3,7 @@ import base64
 import csv
 import io
 import time
+from typing import List
 
 import boto3
 import psycopg2
@@ -52,7 +53,7 @@ choosable_columns = [
     'duration_seconds',
     'position',
 
-    'timestamp',  # == stats_timestamp
+    'timestamp',
     'deployment_timestamp',
 
     'played_seconds',
@@ -203,6 +204,17 @@ def query_to_csv(query: str, cursor=None, vars: Tuple = None) -> Tuple[str, int]
         writer.writerow(record)
     return file_like.getvalue(), num_rows
 
+def query_to_json(query: str, name_map=None, cursor=None, vars: Tuple=None) -> Tuple[List[Any], int]:
+    if cursor is None:
+        cursor = get_db_connection().cursor()
+    cursor.execute(query, vars=vars)
+    names = [x.name for x in cursor.description]
+    if name_map:
+        names = [name_map.get(name, name) for name in names]
+    result = []
+    for record in cursor:
+        result.append(dict(zip(names, record)))
+    return result, len(result)
 
 # Make a connection to the SQL database
 def make_db_connection():
@@ -344,8 +356,9 @@ def depl_by_community(programid: QueryStringParam) -> Any:
 
 @handler(roles=None)
 def supported_languages(programid: QueryStringParam):
+    map = {'languagecode':'code', 'languagename':'name', 'comments':'comments'}
     # Only global "supportedlanguages" supported at this point; per-program language support TBD
-    supported_languages, numlangs = query_to_csv('SELECT * FROM supportedlanguages;', cursor=get_db_connection().cursor())
+    supported_languages, numlangs = query_to_json('SELECT * FROM supportedlanguages;', name_map=map, cursor=get_db_connection().cursor())
     print('{} supported languages'.format(numlangs))
     return supported_languages
 
