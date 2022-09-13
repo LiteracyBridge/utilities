@@ -315,20 +315,28 @@ def do_test():
     testdata.run_tests(args.test)
 
 def do_json():
+    import json
+    from json import JSONEncoder
+    from datetime import date, datetime
+    class DateTimeEncoder(JSONEncoder):
+        # Override the default method
+        def default(self, obj):
+            if isinstance(obj, (date, datetime)):
+                return obj.isoformat()
+
     global args, engine
     for program in args.programs:
-        import json
         output_path = args.json
         if '{' in str(output_path):
             name = str(output_path).format(program_id=program)
             output_path = Path(name)
-        if not output_path.exists():
-            output_path.mkdir(parents=True, exist_ok=True)
+        if not output_path.parent.exists():
+            output_path.parent.mkdir(parents=True, exist_ok=True)
         exporter = XlsExporter.Exporter(program, engine)
         exporter.read_from_database()
         content = Spec.progspec_to_json(exporter.program_spec)
-
-        print(json.dumps(content, indent=2))
+        with open(output_path, 'w') as json_out:
+            json_out.write(json.dumps(content, indent=2, cls=DateTimeEncoder))
 
 def do_compare(comparees):
     global args
@@ -383,7 +391,7 @@ def main():
 
     arg_parser.add_argument('--copy', nargs=2, action=StorePathAction, help='Copy a program spec, removing extranea.')
 
-    arg_parser.add_argument('--json', nargs=1, action=StorePathAction, help='Save the program spec as .json')
+    arg_parser.add_argument('--json', action=StorePathAction, help='Save the program spec as .json')
 
     arg_parser.add_argument('--handler', nargs=1, help='Run a spec handler')
 
