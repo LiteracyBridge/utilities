@@ -1,11 +1,15 @@
 PROJECT = sfToAws
-PYTHON = python3.8
-VIRTUAL_ENV = .sfToAwsEnv
+PYTHON = python3.9
+#VIRTUAL_ENV = .sfToAwsEnv
+VIRTUAL_ENV = $(shell pipenv --venv 2>/dev/null)
 FUNCTION_NAME = sfToAws
 FUNCTION_HANDLER = sfToAws.lambda_handler
 FUNCTION_ROLE = arn:aws:iam::856701711513:role/lambda-checkout
 FUNCTION_DESCRIPTION = Salesforce to AWS utility
 AWS_REGION = us-west-2
+
+PY_LIBS = wheel easy_install setup_tools setuptools pip six _virtualenv distutils _distutils_hack
+AWS_LIBS = boto3 botocore s3transfer
 
 # Default commands
 help: helper
@@ -17,8 +21,8 @@ helper:
 
 virtual:
 	@echo "--> Setup and activate virtualenv"
-	if test ! -d "$(VIRTUAL_ENV)"; then python3 -m venv --system-site-packages $(VIRTUAL_ENV); fi
-	@echo "Use '. $(VIRTUAL_ENV)/bin/activate' to activate virtual environment."
+	if test ! -d "$(VIRTUAL_ENV)"; then pipenv --python $(PYTHON_VER) ; fi
+	@echo "Use 'pipenv shell' to activate virtual environment."
 
 clean_package:
 	rm -rf ./package/* 
@@ -32,6 +36,16 @@ copy_python:
 	if test -d $(VIRTUAL_ENV)/lib64; then cp -a $(VIRTUAL_ENV)/lib64/$(PYTHON)/site-packages/. ./package/tmp/; fi
 
 remove_unused:
+	pwd
+	ls
+	ls ./package
+	ls ./package/tmp
+
+	@for f in $(PY_LIBS) $(AWS_LIBS); do \
+	    rm -rf ./package/tmp/$$f*; \
+	    rm -rf ./package/tmp/__pycache__/$$f*; \
+	done
+
 	rm -rf ./package/tmp/wheel*
 	rm -rf ./package/tmp/easy_install*
 	rm -rf ./package/tmp/setuptools*
