@@ -1,4 +1,4 @@
-PYTHON = python3.8
+PYTHON = python3.9
 ZIPFILE = amplio-layer.zip
 LAYER_NAME = amplio-layer
 DESCRIPTION = 'Python3 code shared among Amplio Lambda functions.'
