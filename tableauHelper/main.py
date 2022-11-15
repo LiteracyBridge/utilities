@@ -7,7 +7,7 @@ from typing import Annotated, Optional, get_type_hints
 
 import boto3
 import jwt
-from amplio.utils import LambdaRouter, Claim, QueryStringParam, handler, _QueryStringParam, _Claim
+from amplio.utils import LambdaRouter, Claim, QueryStringParam, handler
 from botocore.exceptions import ClientError
 
 
@@ -31,8 +31,9 @@ def get_secret():
 
 
 @handler(action='getjwt')
-def get_jwt(email: _Claim[str] = '', programid: _QueryStringParam[str] = 'TEST', testing: _QueryStringParam[bool] = False) -> any:
+def get_jwt(email: Claim[str] = '', programid: QueryStringParam[str] = 'TEST', testing: QueryStringParam[bool] = False) -> any:
     tableau_secret = get_secret()
+    print(tableau_secret)
     claims = {
         "iss": tableau_secret['client'],
         "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=5),
@@ -75,6 +76,6 @@ if __name__ == '__main__':
     is_annotated: bool = isinstance(parms[0].annotation, type(Annotated))
     hints = get_type_hints(get_jwt)
 
-    get_jwt(3, "prog", testing=True)
+    get_jwt("tableau1@amplio.org", "prog", testing=True)
 
     test()
