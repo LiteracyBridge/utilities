@@ -116,6 +116,33 @@ SELECT DISTINCT
         d.enddate
 '''
 
+# DEPLOYMENT_HISTORY = 'SELECT * FROM tbsdeployed WHERE project = %s;'
+# COLLECTION_HISTORY = 'SELECT * from tbscollected WHERE project = %s;'
+
+DEPLOYMENT_HISTORY = '''
+WITH latest AS (SELECT DISTINCT talkingbookid, max(deployedtimestamp) AS deployedtimestamp 
+                FROM tbsdeployed  
+               WHERE project=%s AND talkingbookid NOT IN ('UNKNOWN', '-- TO BE ASSIGNED --')
+            GROUP BY talkingbookid  
+            ORDER BY talkingbookid)
+SELECT tbd.* FROM tbsdeployed tbd
+  JOIN latest latest
+    ON latest.talkingbookid=tbd.talkingbookid AND latest.deployedtimestamp=tbd.deployedtimestamp
+;
+'''
+
+COLLECTION_HISTORY = '''
+WITH latest AS (SELECT DISTINCT talkingbookid, max(collectedtimestamp) AS collectedtimestamp 
+                  FROM tbscollected  
+                 WHERE project=%s AND talkingbookid NOT IN ('UNKNOWN', '-- TO BE ASSIGNED --')
+              GROUP BY talkingbookid  
+              ORDER BY talkingbookid)
+SELECT tbc.* FROM tbscollected tbc
+  JOIN latest latest
+    ON latest.talkingbookid=tbc.talkingbookid AND latest.collectedtimestamp=tbc.collectedtimestamp
+;
+'''
+
 
 
 temp_view = 'temp_usage'
@@ -344,6 +371,14 @@ def tbsdeployed(programid: QueryStringParam) -> Any:
     tbsdeployed, numtbs = query_to_csv(query, cursor=get_db_connection().cursor(), vars=vars)
     print('{} tbs deployed found for {}'.format(numtbs, programid))
     return tbsdeployed
+
+@handler
+def tb_depl_history(programid: QueryStringParam) -> Any:
+    vars = (programid,)
+    deployed, numdeployed = query_to_csv(DEPLOYMENT_HISTORY, cursor=get_db_connection().cursor(), vars=vars)
+    collected, numcollected = query_to_csv(COLLECTION_HISTORY, cursor=get_db_connection().cursor(), vars=vars)
+    print(f'{numdeployed} tbsdeployed, {numcollected} tbscollected for {programid}')
+    return {'tbsdeployed':deployed, 'tbscollected':collected}
 
 # noinspection SqlNoDataSourceInspection
 @handler
