@@ -3,7 +3,6 @@
 import argparse
 import base64
 import csv
-import glob
 import json
 import re
 import sys
@@ -199,7 +198,7 @@ def insert_files(paths: List[Path], table: str, separate: bool = False, verbose:
     commit = not dry_run
     command = make_insert(metadata)
 
-    remaining = deglob(paths)
+    remaining = [x for x in paths]
     while len(remaining) > 0:
         with get_db_connection() as conn:
             transaction = conn.begin()
@@ -237,17 +236,6 @@ def go(args):
     c2ll = parse_c2ll(_args)
     insert_files(_args.files, table=_args.table, verbose=_args.verbose, separate=args.separate, dry_run=_args.dry_run, c2ll=c2ll)
 
-def deglob(paths) -> List[Path]:
-    if isinstance(paths, Path):
-        paths= [paths]
-    result = []
-    for path in paths:
-        path_str = str(path)
-        if '*' in path_str or '?' in path_str:
-            result.extend([Path(x) for x in glob.glob(path_str)])
-        else:
-            result.append(Path(path))
-    return result
 
 class StorePathAction(argparse.Action):
     """
@@ -265,10 +253,24 @@ class StorePathAction(argparse.Action):
         return v and Path(expanduser(v))  # 'None' if v is None, otherwise Path(expanduser(v))
 
     def __init__(self, option_strings, dest, default=None, **kwargs):
+        if 'glob' in kwargs: self._glob = kwargs.get('glob', False); del kwargs['glob']
         super(StorePathAction, self).__init__(option_strings, dest, default=self._expand(default), **kwargs)
 
     def __call__(self, parser, namespace, values, option_string=None):
-        values = [self._expand(v) for v in values] if isinstance(values, list) else self._expand(values)
+        if self._glob and not isinstance(values, list): raise TypeError("The 'glob' option requires that the value is a list; did you use 'nargs'?")
+        if not isinstance(values, list):
+            values = self._expand(values)
+        else:
+            result = []
+            for value in values:
+                path=self._expand(value)
+                path_str = str(path)
+                if self._glob and ('*' in path_str or '?' in path_str):
+                    import glob
+                    result.extend([Path(x) for x in glob.glob(path_str)])
+                else:
+                    result.append(path)
+            values = result
         setattr(namespace, self.dest, values)
 
 
@@ -298,7 +300,7 @@ def main():
     arg_parser.add_argument('--db-name', default='dashboard', metavar='DB',
                             help='Optional database name, default "dashboard".')
 
-    arg_parser.add_argument('--files', nargs='*', action=StorePathAction, help='Files(s) to insert.')
+    arg_parser.add_argument('--files', nargs='*', action=StorePathAction, glob=True, help='Files(s) to insert.')
 
     arglist = None
     ######################################################
