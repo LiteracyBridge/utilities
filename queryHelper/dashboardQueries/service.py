@@ -128,7 +128,7 @@ WITH latest AS (SELECT DISTINCT talkingbookid, max(deployedtimestamp) AS deploye
 SELECT tbd.* FROM tbsdeployed tbd
   JOIN latest latest
     ON latest.talkingbookid=tbd.talkingbookid AND latest.deployedtimestamp=tbd.deployedtimestamp
-;
+;   
 '''
 
 COLLECTION_HISTORY = '''
@@ -143,7 +143,12 @@ SELECT tbc.* FROM tbscollected tbc
 ;
 '''
 
-
+TB_CHANGE_HISTORY = '''
+SELECT insn as "from", outsn as "to" 
+  FROM tbdataoperations 
+ WHERE project=%s AND insn~'[ABC]-[A-F0-9]{8}' AND outsn~'[ABC]-[A-F0-9]{8}' AND insn != outsn 
+ ORDER BY outsn;
+'''
 
 temp_view = 'temp_usage'
 
@@ -231,7 +236,8 @@ def query_to_csv(query: str, cursor=None, vars: Tuple = None) -> Tuple[str, int]
         writer.writerow(record)
     return file_like.getvalue(), num_rows
 
-def query_to_json(query: str, name_map=None, cursor=None, vars: Tuple=None) -> Tuple[List[Any], int]:
+
+def query_to_json(query: str, name_map=None, cursor=None, vars: Tuple = None) -> Tuple[List[Any], int]:
     if cursor is None:
         cursor = get_db_connection().cursor()
     cursor.execute(query, vars=vars)
@@ -242,6 +248,7 @@ def query_to_json(query: str, name_map=None, cursor=None, vars: Tuple=None) -> T
     for record in cursor:
         result.append(dict(zip(names, record)))
     return result, len(result)
+
 
 # Make a connection to the SQL database
 def make_db_connection():
@@ -301,9 +308,10 @@ def usage(programid: str = path_param(1), deployment: str = path_param(2),
     # A string is an error message.
     return result, (400 if isinstance(result, str) else 200)
 
+
 @handler
 def usage2(programid: QueryStringParam, deployment: QueryStringParam,
-          columns: QueryStringParam = 'deploymentnumber,startdate,category,sum(completions),sum(played_seconds)') -> Any:
+           columns: QueryStringParam = 'deploymentnumber,startdate,category,sum(completions),sum(played_seconds)') -> Any:
     start = time.time_ns()
 
     sqv2 = SQV2(choosable_columns, temp_view, augment='sum(completions),sum(played_seconds)')
@@ -372,13 +380,16 @@ def tbsdeployed(programid: QueryStringParam) -> Any:
     print('{} tbs deployed found for {}'.format(numtbs, programid))
     return tbsdeployed
 
+
 @handler
 def tb_depl_history(programid: QueryStringParam) -> Any:
     vars = (programid,)
     deployed, numdeployed = query_to_csv(DEPLOYMENT_HISTORY, cursor=get_db_connection().cursor(), vars=vars)
     collected, numcollected = query_to_csv(COLLECTION_HISTORY, cursor=get_db_connection().cursor(), vars=vars)
+    changed, numchanged = query_to_csv(TB_CHANGE_HISTORY, cursor=get_db_connection().cursor(), vars=vars)
     print(f'{numdeployed} tbsdeployed, {numcollected} tbscollected for {programid}')
-    return {'tbsdeployed':deployed, 'tbscollected':collected}
+    return {'tbsdeployed': deployed, 'tbscollected': collected, 'tbschanged': changed}
+
 
 # noinspection SqlNoDataSourceInspection
 @handler
@@ -389,13 +400,16 @@ def depl_by_community(programid: QueryStringParam) -> Any:
     print('{} deployments-by-community found for {}'.format(numdepls, programid))
     return tbsdeployed
 
+
 @handler(roles=None)
 def supported_languages(programid: QueryStringParam):
-    map = {'languagecode':'code', 'languagename':'name', 'comments':'comments'}
+    map = {'languagecode': 'code', 'languagename': 'name', 'comments': 'comments'}
     # Only global "supportedlanguages" supported at this point; per-program language support TBD
-    supported_languages, numlangs = query_to_json('SELECT * FROM supportedlanguages;', name_map=map, cursor=get_db_connection().cursor())
+    supported_languages, numlangs = query_to_json('SELECT * FROM supportedlanguages;', name_map=map,
+                                                  cursor=get_db_connection().cursor())
     print('{} supported languages'.format(numlangs))
     return supported_languages
+
 
 def lambda_handler(event, context):
     the_router = LambdaRouter(event, context)
