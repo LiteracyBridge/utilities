@@ -183,7 +183,7 @@ class CsvInsert:
     # Recognizes (+1.234,-56.789)
     COORD_RE = re.compile(r'"?\((?P<lat>[+-]?[0-9.]+),(?P<lon>[+-]?[0-9.]+)\)"?')
 
-    def insert_file(self, csv_path: Path, command, columns: List[str], connection):
+    def insert_file(self, csv_path: Path, command, columns: List[str], nullables: List[str], connection):
         def tr_c2ll(row: Dict) -> Dict:
             """
             Look for columns that are mentioned in the --c2ll option. Any found, convert to the
@@ -204,7 +204,7 @@ class CsvInsert:
             # add 'None' values for columns missing from csv file
             row = row | {c: None for c in columns if c not in row}
             for c in columns:
-                if c not in row:
+                if c not in row or (row[c] is not None and c in nullables and len(row[c])==0):
                     row[c] = None
             return row
 
@@ -227,6 +227,7 @@ class CsvInsert:
         if (metadata := self.get_table_metadata(self._table)) is None:
             raise Exception(f'Table {self._table} does not seem to exist.')
         columns: List[str] = [x.name for x in metadata.columns]
+        nullables: List[str] = [x.name for x in metadata.columns if x.nullable]
         print(metadata)
         commit = not self._dry_run
         command = self.make_insert(metadata)
@@ -237,7 +238,7 @@ class CsvInsert:
                 transaction = conn.begin()
                 while len(remaining) > 0:
                     path = remaining.pop(0)
-                    self.insert_file(path, command, columns, conn)
+                    self.insert_file(path, command, columns, nullables, conn)
                     if self._separate:
                         break
                 if commit:
