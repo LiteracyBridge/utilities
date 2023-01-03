@@ -2,6 +2,7 @@
 import base64
 import csv
 import io
+import re
 import time
 from typing import List
 
@@ -120,6 +121,11 @@ SELECT DISTINCT
 # COLLECTION_HISTORY = 'SELECT * from tbscollected WHERE project = %s;'
 
 DEPLOYMENT_HISTORY = '''
+SELECT tbd.* 
+  FROM tbsdeployed tbd
+ WHERE project=%s AND talkingbookid NOT IN ('UNKNOWN', '-- TO BE ASSIGNED --');   
+'''
+DEPLOYMENT_HISTORY_LATEST = '''
 WITH latest AS (SELECT DISTINCT talkingbookid, max(deployedtimestamp) AS deployedtimestamp 
                 FROM tbsdeployed  
                WHERE project=%s AND talkingbookid NOT IN ('UNKNOWN', '-- TO BE ASSIGNED --')
@@ -132,6 +138,11 @@ SELECT tbd.* FROM tbsdeployed tbd
 '''
 
 COLLECTION_HISTORY = '''
+SELECT tbc.* 
+  FROM tbscollected tbc
+ WHERE project=%s AND talkingbookid NOT IN ('UNKNOWN', '-- TO BE ASSIGNED --');
+'''
+COLLECTION_HISTORY_LATEST = '''
 WITH latest AS (SELECT DISTINCT talkingbookid, max(collectedtimestamp) AS collectedtimestamp 
                   FROM tbscollected  
                  WHERE project=%s AND talkingbookid NOT IN ('UNKNOWN', '-- TO BE ASSIGNED --')
@@ -382,10 +393,14 @@ def tbsdeployed(programid: QueryStringParam) -> Any:
 
 
 @handler
-def tb_depl_history(programid: QueryStringParam) -> Any:
+def tb_depl_history(programid: QueryStringParam, latest: QueryStringParam='F') -> Any:
+    latest_only = latest and re.match(r'(?i)[yt1].*', latest)
+    print(f'Get deployment history for {programid}, latest: {latest_only}.')
     vars = (programid,)
-    deployed, numdeployed = query_to_csv(DEPLOYMENT_HISTORY, cursor=get_db_connection().cursor(), vars=vars)
-    collected, numcollected = query_to_csv(COLLECTION_HISTORY, cursor=get_db_connection().cursor(), vars=vars)
+    deployed, numdeployed = query_to_csv(DEPLOYMENT_HISTORY_LATEST if latest_only else DEPLOYMENT_HISTORY,
+                                         cursor=get_db_connection().cursor(), vars=vars)
+    collected, numcollected = query_to_csv(COLLECTION_HISTORY_LATEST if latest_only else COLLECTION_HISTORY,
+                                           cursor=get_db_connection().cursor(), vars=vars)
     changed, numchanged = query_to_csv(TB_CHANGE_HISTORY, cursor=get_db_connection().cursor(), vars=vars)
     print(f'{numdeployed} tbsdeployed, {numcollected} tbscollected for {programid}')
     return {'tbsdeployed': deployed, 'tbscollected': collected, 'tbschanged': changed}
