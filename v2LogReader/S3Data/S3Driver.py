@@ -68,10 +68,12 @@ class S3Driver:
         rev_k = functools.cmp_to_key(rev_cmp)
 
         for s3_obj in self._s3_objects:
-            s3_importer = S3Importer(self._source_bucket, s3_obj, self._now, **self._kwargs)
-            s3_importer.do_import()
-            summary = s3_importer.summary
-            self._details.setdefault(summary.programid, {}).setdefault(summary.names, []).append(summary)
+            if s3_obj['Key'][-1] != '/': # ignore the s3 equivalent of directories.
+                s3_importer = S3Importer(self._source_bucket, s3_obj, self._now, **self._kwargs)
+                if s3_importer.is_valid:
+                    s3_importer.do_import()
+                    summary = s3_importer.summary
+                    self._details.setdefault(summary.programid, {}).setdefault(summary.names, []).append(summary)
 
         # Summarize {programid: program_summary}
         summaries = {}

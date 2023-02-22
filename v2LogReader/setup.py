@@ -7,7 +7,7 @@ requirements = [
 
 setup(
     name='v2LogReader',
-    version='0.8',
+    version='0.9',
     packages=['utils', 'tbstats', 'V2LogReader', 'S3Data'],
     py_modules=['run'],
     url='',

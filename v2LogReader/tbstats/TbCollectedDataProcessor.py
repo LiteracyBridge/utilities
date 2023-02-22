@@ -364,6 +364,13 @@ class TbCollectedData:
             return None
 
     @property
+    def deployment_num(self) -> int:
+        try:
+            return int(self._stats_collected_properties_data.get('deployment_DEPLOYMENT_NUMBER'))
+        except:
+            return None
+
+    @property
     def stats_collected_properties(self):
         return {k: v for k, v in self._stats_collected_properties_data.items()}
 
