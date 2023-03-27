@@ -33,7 +33,7 @@ class Playlist():
     messages: List[Message] = field(default_factory=list)
 
     def get_message(self, ix):
-        return self.messages[ix]
+        return self.messages[ix] if ix>=0 and ix<len(self.messages) else None
 
 
 @dataclass
