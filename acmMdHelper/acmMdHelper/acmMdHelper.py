@@ -52,7 +52,7 @@ LOAD_DATA_PARAMS = {
         'programid': 'project',
         'table': 'contentinpackage',
         'pk': 'contentinpackage_pkey',
-        'pk_columns': ['project', 'contentpackage', 'contentid', 'categoryid', 'position'],
+        'pk_columns': ['project', 'contentpackage', 'contentid', 'categoryid'],
         'uc': ['project', 'contentpackage'],
         'csv_to_sql': {'project': 'project', 'contentpackage': 'contentpackage', 'contentid': 'contentid',
                        'categoryid': 'categoryid', 'order': 'position'}
