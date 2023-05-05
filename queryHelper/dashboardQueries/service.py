@@ -425,6 +425,36 @@ def supported_languages(programid: QueryStringParam):
     print('{} supported languages'.format(numlangs))
     return supported_languages
 
+@handler(roles=None)
+def supported_categories(programid: QueryStringParam):
+    map = {'categorycode': 'code', 'parentcategory': 'parent_category', 'is_leaf': 'isleafnode', 'categoryname': 'name', 'fullname': 'full_name'}
+    # Only global "supportedlanguages" supported at this point; per-program language support TBD
+    supported_categories, numcats = query_to_json('SELECT * FROM supportedcategories;', name_map=map,
+                                                  cursor=get_db_connection().cursor())
+    print('{} supported categories'.format(numcats))
+    return supported_categories
+
+@handler
+def get_roadmap(programid: QueryStringParam):
+    roadmap, _ = query_to_json('SELECT * FROM roadmap WHERE program_id = %s;', vars=(programid,))
+    roadmap = roadmap[0]
+    print(f'Roadmap for {programid}: {roadmap}')
+    return roadmap
+
+@handler(roles='AD,PM')
+def put_roadmap(programid: QueryStringParam, completed: JsonBody):
+    # noinspection SqlResolve
+    query = 'UPDATE roadmap SET completed = %s WHERE program_id ILIKE %s;'
+    completed_str = json.dumps(completed)
+    vars = (completed_str, programid)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(query, vars=vars)
+    conn.commit()
+    print(f'Updated {cursor.rowcount} row(s)')
+    return cursor.rowcount
+
+
 
 def lambda_handler(event, context):
     the_router = LambdaRouter(event, context)
@@ -449,13 +479,13 @@ if __name__ == '__main__':
     result = lambda_handler(event, None)
     body = json.loads(result['body'])
     status_code = result['statusCode']
-    print("\n\nStatus code {}\n     Result {}".format(status_code, body))
+    print(f'\n\nStatus code {status_code}\n     Result {body}')
 
     event['queryStringParameters']['cols'] = 'unknown,missing,invalid,caps(nothing)'
     result = lambda_handler(event, None)
     body = json.loads(result['body'])
     status_code = result['statusCode']
-    print("\n\nStatus code {}\n     Result {}".format(status_code, body))
+    print(f'\n\nStatus code {status_code}\n     Result {body}')
 
     event['queryStringParameters']['programid'] = 'TEST'
     event['queryStringParameters']['deployment'] = 1
@@ -465,7 +495,7 @@ if __name__ == '__main__':
     result = lambda_handler(event, None)
     body = json.loads(result['body'])
     status_code = result['statusCode']
-    print("\n\nStatus code {}\n     Result {}".format(status_code, body))
+    print(f'\n\nStatus code {status_code}\n     Result {body}')
 
     event['pathParameters'] = {'proxy': 'recipients'}
     result = lambda_handler(event, None)
@@ -480,8 +510,21 @@ if __name__ == '__main__':
     print(result)
 
     event['pathParameters'] = {'proxy': 'supported_languages'}
-    event['queryStringParameters']['programid']
     result = lambda_handler(event, None)
     print(result)
+
+    event['pathParameters'] = {'proxy': 'get_roadmap'}
+    result = lambda_handler(event, None)
+    body = json.loads(result['body'])
+    status_code = result['statusCode']
+    print(f'\n\nStatus code {status_code}\n     Result {body}')
+
+    body = [1,2]
+    event['pathParameters'] = {'proxy': 'put_roadmap'}
+    event['body'] = json.dumps(body)
+    result = lambda_handler(event, None)
+    status_code = result['statusCode']
+    print(f'\n\nStatus code {status_code}')
+
 
     print('Done.')

@@ -68,6 +68,12 @@ def _list_objects(Bucket=PROGSPEC_BUCKET, Prefix=''):
 # List the versions of objects with the given prefix.
 # noinspection PyPep8Naming
 def _list_versions(Bucket=PROGSPEC_BUCKET, Prefix=''):
+    """
+    List objects an versions under Prefix in the given bucket.
+    :param Bucket: The bucket to be searched.
+    :param Prefix: Previx within the buckeet.
+    :yields: Object versions.
+    """
     paginator = s3.get_paginator("list_object_versions")
     kwargs = {'Bucket': Bucket, 'Prefix': Prefix}
     for versions in paginator.paginate(**kwargs):
@@ -77,6 +83,12 @@ def _list_versions(Bucket=PROGSPEC_BUCKET, Prefix=''):
 
 # Delete versions that match the given prefix. Optional string or iterable list of versions to not delete.
 def _delete_versions(prefix: str, versions_to_keep=None):
+    """
+    Delete versions that match the given prefix. Optional string or iterable of versions to keep.
+    :param prefix: The prefix under which to delete objects.
+    :param versions_to_keep: A string or iterable of versions of objects to be kept.
+    :return: None
+    """
     if prefix is None or len(prefix) < 2:
         raise ValueError('Must specify a prefix to delete.')
     if versions_to_keep is None:
