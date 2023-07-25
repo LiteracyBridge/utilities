@@ -2,7 +2,7 @@ amplio
 boto3==1.9.215
 boto3-stubs==1.15.6.0
 botocore==1.12.253
-certifi==2022.12.7
+certifi==2023.7.22
 et-xmlfile==1.0.1
 jdcal==1.4
 jmespath==0.9.4
