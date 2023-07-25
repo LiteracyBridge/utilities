@@ -1,7 +1,7 @@
 amplio
 boto3==1.21.40
 botocore==1.24.40
-certifi==2022.12.7
+certifi==2023.7.22
 et-xmlfile==1.1.0
 jmespath==1.0.0
 openpyxl==3.0.9
