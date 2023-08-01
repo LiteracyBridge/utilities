@@ -5,7 +5,7 @@ from typing import Tuple, List, Dict
 import boto3
 from botocore.client import BaseClient
 
-from ps import ProgramSpec
+from ps.spec import ProgramSpec
 from ps.XlsxReaderWriter import write_to_csv, write_to_xlsx, ARTIFACTS as CSV_ARTIFACTS
 
 _s3 = None

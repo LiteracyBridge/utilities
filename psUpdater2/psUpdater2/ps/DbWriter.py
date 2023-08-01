@@ -131,9 +131,13 @@ class _DbWriter:
         additions = []
         for r in self._program_spec.recipients:
             if r.new_recipientid:
-                # Newly computed recipientid, so it is a new recipient.
-                additions.append(
-                    {**dataclasses.asdict(r), 'project': self._program_spec.program_id, 'recipientid': r.recipientid})
+                # Newly computed recipientid, so it is a (probably) new recipient (unless a spreadsheet's being uploaded again).
+                sr0 = {**dataclasses.asdict(r), 'project': self._program_spec.program_id, 'recipientid': r.recipientid}
+                sr = r.sql_row
+                sr['project'] = self._program_spec.program_id
+                sr['program_id'] = self._program_spec.program_id
+                # Remember the recipient. We may forget it later, if we determine that it is a duplicate.
+                additions.append(sr)
             else:
                 # Has a recipient id, save to check against the recipients in the database.
                 ps_recips[r.recipientid] = r
@@ -143,6 +147,7 @@ class _DbWriter:
         values = {'program_id': self._program_spec.program_id}
         result = self._connection.execute(command, values)
         print(f'{result.rowcount} existing recipients for {self._program_spec.program_id}.')
+        duplicate_additions = []
         for sql_row in result:
             row_id = sql_row['recipientid']
             # Only look at the db_rows for which we have csv rows. Ignore recipients no longer active in the program
@@ -151,6 +156,14 @@ class _DbWriter:
                 if differ(sql_row, ps_recips[row_id]):
                     # updates.append({'project': self._program_spec.program_id, **dataclasses.asdict(ps_recips[row_id])})
                     updates.append({'project': self._program_spec.program_id, **ps_recips[row_id].sql_row})
+            # If any addition matches the sql row, drop that addition
+            sql_dict = dict(sql_row)  # sqlalchemy row.get() throws instead of returning None when item not found.
+            for addition in additions:
+                duplicate = all((sql_dict.get(col) == addition.get(col) for col in ['country', 'region', 'district', 'communityname', 'groupname', 'agent', 'language']))
+                if duplicate:
+                    duplicate_additions.append(addition.get('recipientid'))
+        additions = [x for x in additions if x.get('recipientid') not in duplicate_additions]
+
         # To give visibility into what's being changed.
         for d in diffs:
             print(d)
@@ -250,12 +263,14 @@ class _DbWriter:
             columns.append('deployment_id')
         else:
             columns.append('deploymentnumber')
-        if not self._audience_in_messages:
-            columns.append('audience')
-        command = text(f'INSERT INTO playlists ({",".join(columns)}) VALUES (:{",:".join(columns)}  );')
         values = {'program_id': self._program_spec.program_id, 'deployment_id': deployment_id,
                   'position': playlist.position,
-                  'title': playlist.title, 'audience': playlist.audience, 'deploymentnumber': deploymentnumber}
+                  'title': playlist.title, 'deploymentnumber': deploymentnumber}
+        if not self._audience_in_messages:
+            columns.append('audience')
+            audiences = [m.audience for m in playlist.messages if m.audience]
+            values['audience'] = audiences[0] if len(audiences)>0 else ''
+        command = text(f'INSERT INTO playlists ({",".join(columns)}) VALUES (:{",:".join(columns)}  );')
 
         self._connection.execute(command, values)
 
@@ -289,10 +304,11 @@ class _DbWriter:
         if not self._use_message_languages:
             columns.append('languages')
         command = text(f'INSERT INTO messages ({",".join(columns)}) VALUES (:{",:".join(columns)}  );')
+
+        goal_id = message.sdg_goal if message.sdg_goal else None
         # just the target part, without the goal part.
         sdg_target = message.sdg_target[
-                     message.sdg_target.find(
-                         '.') + 1:] if message.sdg_target and '.' in message.sdg_target else message.sdg_target
+                     message.sdg_target.find('.') + 1:] if message.sdg_target and '.' in message.sdg_target else message.sdg_target
 
         # This would be better as a string column of the category name, because user may need to disambiguate.
         default_category_code = self._category_code_converter(message.default_category_code)
@@ -300,7 +316,7 @@ class _DbWriter:
         values = {'program_id': self._program_spec.program_id, 'playlist_id': playlist_id, 'position': message.position,
                   'title': message.title, 'format': message.format,
                   'default_category_code': default_category_code, 'variant': message.variant,
-                  'sdg_goal_id': message.sdg_goal, 'sdg_target': sdg_target,
+                  'sdg_goal_id': goal_id, 'sdg_target': sdg_target,
                   'sdg_target_id': message.sdg_target, 'key_points': message.key_points,
                   'audience': message.audience, 'languages': message.languages}
 

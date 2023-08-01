@@ -11,6 +11,7 @@ from typing import List, Optional, Union, Dict, Any, Tuple
 
 from sqlalchemy.engine import Engine, Connection
 
+JSONABLE_TYPE_RE = re.compile(r'(?i)(typing.)?(list|dict)(\[\w*])?')
 
 class _SpecClass:
     """
@@ -90,7 +91,7 @@ class _SpecClass:
         parts = str(v).split(' ')
         if parts:
             v = parts[0]
-        if v[-1] == '.':
+        if len(v)>1 and v[-1] == '.':
             v = v[0:-1]
         return v
 
@@ -138,7 +139,7 @@ class _SpecClass:
             return _SpecClass.parse_str(v)
         elif field_def.type == int:
             return _SpecClass.parse_int(v)
-        elif field_def.type == list or field_def.type == dict:
+        elif field_def.type == list or field_def.type == dict or JSONABLE_TYPE_RE.match(str(field_def.type)):
             return _SpecClass.parse_object(v)
         elif field_def.type == datetime.date or field_def.type == datetime.datetime.date:
             return _SpecClass.parse_date(v)
@@ -217,12 +218,12 @@ class _SpecClass:
             if value is None:
                 return '' if target != 'sql' else None
             return int(value)
-        elif target in ['csv', 'xlsx']:
-            return _SpecClass.format_csv_str(value)
         elif isinstance(value, list) or isinstance(value, dict):
             return json.dumps(value)
         elif isinstance(value, set):
             return json.dumps(list(value))
+        elif target in ['csv', 'xlsx']:
+            return _SpecClass.format_csv_str(value)
         elif value is None:
             return '' if target != 'sql' else None
         else:

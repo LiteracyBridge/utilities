@@ -25,7 +25,7 @@ def cannonical_acm_dir_name(project: str, is_dbx: bool = True) -> str:
     return acmdir
 
 
-def _get_path(program: str, file: str) -> Path:
+def _get_path(program: str, file: str, dir: Optional[Path]) -> Path:
     """
     Get the path to a config or program spec file. If the '--dbx' option is given, returns a Path to the
     file in the ~/Dropbox/ACM-{program}/ directory. If the '--s3' option is given, returns a Path to the
@@ -35,7 +35,9 @@ def _get_path(program: str, file: str) -> Path:
     :return: Path to the file.
     """
     global args
-    if args.dbx:
+    if dir:
+        result = Path(dir, program, file)
+    elif args.dbx:
         acmdir = cannonical_acm_dir_name(program)
         if file == 'config.properties':
             result = Path(args.dropbox, acmdir, file)
@@ -150,6 +152,22 @@ def do_tests():
     do_publish(spec_db)
     # test_clone()
 
+def do_export(programs: List[str], dir: Path):
+    global args
+    for program in programs:
+        print(f'Exporting program spec for {program}.')
+        path = _get_path(program, 'db_progspec.xlsx', dir)
+        if not path.expanduser():
+            print(f'File {path} is not found')
+            return
+        stem = path.stem
+        path_db = path.with_name(f'{stem}-db{path.suffix}')
+        spec_db, messages = ProgramSpec.create_from_db(program)
+        print(f'Exporting  db-created program spec to {path_db}')
+        path_db.parent.mkdir(parents=True, exist_ok=True)
+        spec_db.write_to_xlsx(path_db)
+
+
 
 def do_import(programs: List[str], what: Any, commit: bool = True) -> None:
     global args
@@ -216,7 +234,10 @@ def do_import(programs: List[str], what: Any, commit: bool = True) -> None:
             transaction = conn.begin()
             spec.write_to_db(connection=conn)
             reimported_db_spec, messages = ProgramSpec.create_from_db(program, connection=conn)
-            transaction.rollback()
+            if args.disposition=='commit':
+                transaction.commit()
+            else:
+                transaction.rollback()
 
         diffs = ps.compare_program_specs(spec, reimported_db_spec)
         print(f'{"Diffs" if diffs else "No diffs"} from original and re-imported database')
@@ -323,6 +344,7 @@ def main():
                             help='Import from XLS to Progspec.')
     arg_parser.add_argument('--disposition', choices=['abort', 'commit'], default='abort',
                             help='Database disposition for the import operation.')
+    arg_parser.add_argument('--export', action=StorePathAction, help='Export the program spec from the database.')
 
     arg_parser.add_argument('--compare', nargs=2, help='Compare a program spec vs the database')
 
@@ -368,6 +390,8 @@ def main():
         do_json(args.programs)
     elif args.imports:
         do_import(args.programs, args.imports, args.disposition == 'commit')
+    elif args.export:
+        do_export(args.programs, args.export)
     elif args.compare:
         do_compare(args.compare[0], args.compare[1])
     elif args.test:

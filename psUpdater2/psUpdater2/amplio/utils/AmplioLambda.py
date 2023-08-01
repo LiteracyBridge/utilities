@@ -380,7 +380,7 @@ class LambdaRouter():
     the proper arguments.
 
     Sample usage:
-        @handler(role='AD,PM') # user must be configured with AD or PM role in the program.
+        @handler(roles='AD,PM') # user must be configured with AD or PM role in the program.
         def some_pm_function(programid: queryStringParam, data_desired: JsonBody):
             result, http_response_code = do_pm_work(programid, data_desired)
             return result, http_response_code
