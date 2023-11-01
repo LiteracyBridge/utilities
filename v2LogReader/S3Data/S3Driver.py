@@ -89,6 +89,7 @@ class S3Driver:
                         program_summary['deployments'] += s.deployments
                         program_summary['play_statistics'] += s.play_statistics
                         program_summary['uf_messages'] += s.uf_messages
+                        program_summary['surveys'] += s.surveys
                         program_summary['s3_errors'] += s.s3_errors
                         program_summary['disposition'][s.disposition] = program_summary['disposition'].get(s.disposition, 0) + 1
 
@@ -96,6 +97,7 @@ class S3Driver:
             print(f'Summary for {programid}; processed {len(program_summary.get("keys"))} zip file(s), from {len(program_summary.get("names"))} TB-Loader(s).')
             print(f'    {program_summary.get("collections", "no")} collection(s), {program_summary.get("deployments", "no")} deployment(s), '
                   f'{program_summary.get("play_statistics", "no")} play statistic(s), {program_summary.get("uf_messages", "no")} uf message(s), '
+                  f'{program_summary.get("surveys", "no")} survey(s), '
                   f'{program_summary.get("s3_errors", "no")} s3 error(s), ')
             dispositions = program_summary.get("disposition", {'unknown', ''})
             print(f'      disposition(s): {", ".join([f"{k}:{v}" for k,v in dispositions.items()])}')

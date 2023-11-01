@@ -30,9 +30,16 @@ def save_as_csv(csv_dict: dict, csv_path: Path):
 
 
 def parse_as_csv(csv_data: str, c2ll: bool = False) -> List[Dict]:
+    """
+    Parses data as the lines of a .csv file.
+    :param csv_data: The bytes of the data.
+    :param c2ll: If true, convert "coordinates" columns to "latitude,longitude'
+    :return: a list of dicts of the csv contents.
+    """
     result = []
     csv_io = io.StringIO(csv_data)
     csv_reader = csv.DictReader(csv_io)
+    row: dict
     for row in csv_reader:
         if (c_val := row.get('coordinates')) and c2ll:
             if match := COORD_RE.match(c_val):

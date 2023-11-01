@@ -121,7 +121,16 @@ def read_packages_data(file: Path, **kwargs) -> Deployment:
         a_pathix, a_filename, _ = get_audio()
         i_pathix, i_filename, _ = get_audio()
         playlist: Playlist = Playlist(position, title, a_pathix, a_filename, i_pathix, i_filename)
-        num_messages = int(get_line())
+        # There can be an arbitrary number of non-numeric flags and directives here. The count of messages
+        # follows. Skip flags until we find an all-numeric line.
+        num_messages = None
+        while num_messages is None:
+            line = get_line()
+            if line.isdigit():
+                num_messages = int(line)
+            else:
+                # some flag that we don't care about -- if we ever do, parse it here
+                pass
         for n in range(0, num_messages):
             playlist.messages.append(read_message(n + 1))
         return playlist

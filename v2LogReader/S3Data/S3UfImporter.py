@@ -16,6 +16,7 @@ from tbstats import decode_properties, TbCollectedData
 from utils import escape_csv
 
 # Recognize a userrecording filename, and extract the parts.
+# Like: yyyy-mm-ddTHH:MM:SS.tttZ/userrecordings/uf_pkg0_pl0_msg10_0.properties
 _UF_FILE_PATTERN = re.compile(r'(?ix)(?P<year>\d{4})-?(?P<month>\d{2})-?(?P<day>\d{2})[ T]?'
                               r'(?P<hour>\d{2}):?(?P<minute>\d{2}):?(?P<second>\d{2})\.(?P<fraction>\d*)Z/'
                               r'userrecordings/'
@@ -23,6 +24,10 @@ _UF_FILE_PATTERN = re.compile(r'(?ix)(?P<year>\d{4})-?(?P<month>\d{2})-?(?P<day>
 
 # Extract package #, playlist #, message # from a UF filename
 _UF_RELATION_PATTERN = re.compile(r'(?ix)uf_pkg(?P<pkg>\d+)_pl(?P<pl>\d+)_msg-?(?P<msg>\d+).*')
+_UF_RECORDING_PATTERN = re.compile(r'(?ix)uf_pkg(?P<pkg>\d+)_pl(?P<pl>\d+)_msg-?(?P<msg>\d+)_(?P<no>\d+).*')
+
+# Pick 'survey1' out of 'userrecordings/survey1_1.survey'
+_SURVEY_ID_RE = re.compile(r'(?ix)(.*\\)?(?P<id>[^.]*?)(?:_\d*)?\.survey')
 
 _UF_PROPERTY_TO_UF_COLUMN = {
     # prop_name: column_name
@@ -67,6 +72,8 @@ class S3UfImporter:
         self._userrecordings_properties = {}
         self._uf_messages_csv_rows = []
         self._found_uf = False
+        self._fn_stem_to_uuid_map = {}
+        self._surveys = {}
 
     @property
     def matched_files(self):
@@ -75,6 +82,14 @@ class S3UfImporter:
     @property
     def userrecordings_properties(self):
         return self._userrecordings_properties
+
+    @property
+    def surveys(self):
+        return self._surveys
+
+    @property
+    def have_surveys(self):
+        return len(self._surveys) > 0
 
     @property
     def have_uf(self):
@@ -102,9 +117,15 @@ class S3UfImporter:
             if m := _UF_FILE_PATTERN.match(zipinfo.filename):
                 self._matched_files.add(zipinfo.filename)
                 if m.group('suffix').lower() == '.properties':
+                    # remember as { stem : {uf_properties} }
                     data = zipfile.read(zipinfo.filename)
-                    self._userrecordings_properties[m.group('stem')] = decode_properties(data.decode('utf-8'),
-                                                                                         sep='[:=]')
+                    self._userrecordings_properties[m.group('stem')] = (
+                        decode_properties(data.decode('utf-8'), sep='[:=]'))
+                elif m.group('suffix').lower() == '.survey':
+                    # remember as { name : {survey_answers} }
+                    data = zipfile.read(zipinfo.filename)
+                    self._surveys[m.group('name')] = (
+                        decode_properties(data.decode('utf-8'), sep='[:=]'))
                 uf_suffixes = uf_files.setdefault(m.group('stem'), {})
                 uf_suffixes[m.group('suffix')] = zipinfo.filename
 
@@ -194,16 +215,39 @@ class S3UfImporter:
             seconds = data_bytes / bytes_per_second
             return seconds
 
+        def get_props():
+            if fn in self._userrecordings_properties:
+                return self._userrecordings_properties[fn]
+            props = {}
+            # there wasn't a .properties file, try to synthesize one.
+            if m := _UF_RELATION_PATTERN.match(fn):
+                # Get as much as we can. If no message has been selected, there won't be "MESSAGE-*"; if no
+                # playlist, then no PLAYLIST-*. The first package is auto-selected, so it should exist.
+                if pkg := self._tb_collected_data.packages_data.get_package(int(m.group('pkg'))):
+                    props = {'PACKAGE_NAME': pkg.name, 'PACKAGE_NUM': int(m.group('pkg')),
+                             'DEVICE_ID': self._tb_collected_data.talkingbookid}
+                    if pl := pkg.get_playlist(int(m.group('pl'))):
+                        props['PLAYLIST_NAME'] = pl.title
+                        props['PLAYLIST_NUM'] = int(m.group('pl'))
+                        if msg := pl.get_message(int(m.group('msg'))):
+                            props['MESSAGE_NAME'] = msg.title
+                            props['MESSAGE_NUM'] =  int(m.group('msg'))
+                    self._userrecordings_properties[fn] = props
+                    return props
+
         if len(raw_data) < 44:
             return False  # can't be a valid .wav file
 
-        properties = self._userrecordings_properties[fn]
+        properties = get_props()
+        if not properties:
+            return False  # Can't tell what recording this applies to.
         # If the UUID has not already been created, do so now. Ideally it is assigned at TB-Loader time or earlier.
         # We need the UUID here to name the .mp3 file.
         if not (uuid := properties.get('metadata.MESSAGE_UUID')):
             uuid = str(uuid4())
             properties['metadata.MESSAGE_UUID'] = uuid
 
+        self._fn_stem_to_uuid_map[Path(fn).stem] = uuid
         data = fix_wav_length(raw_data)
 
         wav_path = Path(self._temp_dir_path, 'userrecordings', fn).with_suffix('.wav')
@@ -280,6 +324,36 @@ class S3UfImporter:
             print(','.join(_UF_PROPERTY_TO_UF_COLUMN.values()), file=uf_messages_file)
             for row in self._uf_messages_csv_rows:
                 print(','.join([escape_csv(row[x]) for x in _UF_PROPERTY_TO_UF_COLUMN.values()]), file=uf_messages_file)
+
+    def fill_survey_metadata(self):
+        """
+        Adds global information about this collection to any surveys that were collected.
+        :return: None
+        """
+        if not self.have_surveys:
+            return
+        collection_props = self._tb_collected_data.stats_collected_properties
+
+        survey: dict
+        for fn, survey in self._surveys.items():
+            updates: dict = {}
+            for key, value in survey.items():
+                # Translate filenames to message_uuids, like: s1q10:uf_pkg0_pl0_msg10_0 => s1q10:1181fc6b-89c8-47fc-a5c5-2c520d537352
+                value_stem = Path(value).stem
+                if value_stem in self._fn_stem_to_uuid_map:
+                    updates[key] = self._fn_stem_to_uuid_map[value_stem]
+                # Create a surveyid if there isn't one already.
+                if 'surveyid' not in survey:
+                    if (m:=_SURVEY_ID_RE.match(fn)):
+                        updates['surveyid'] = m.group('id')
+                # Add deployment & collection data
+                updates['programid'] = collection_props['deployment_PROJECT']   # for convenience only; implicit in recipientid
+                updates['recipientid'] = collection_props['deployment_RECIPIENTID']
+                updates['talkingbookid'] = collection_props['deployment_TALKINGBOOKID']
+                updates['deployment_uuid'] = collection_props['deployment_DEPLOYEDUUID']
+                updates['collection_uuid'] = collection_props['STATSUUID']
+            if updates:
+                survey.update(updates)
 
     def recover_session_key(self, encoded_session_key, encoded_iv) -> Tuple[Optional[bytes], Optional[bytes]]:
         """

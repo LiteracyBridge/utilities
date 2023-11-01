@@ -17,6 +17,13 @@ from tbstats import TbCollectedData
 from utils import get_table_metadata, get_db_connection
 from utils.csvUtils import parse_as_csv, csv_as_str
 
+UF_MESSAGES_TABLE = 'uf_messages'
+PLAY_STATISTICS_TABLE = 'playstatistics'
+TBS_DEPLOYED_TABLE = 'tbsdeployed'
+TBS_COLLECTED_TABLE = 'tbscollected'
+SURVEY_RESPONSES_TABLE = 'survey_responses'
+SURVEYS_TABLE = 'surveys'
+
 # Recognize the TalkingBookData.zip filename.
 _TBDATA_ZIP_PATTERN = re.compile(r'(?ix)(?P<year>\d{4})-?(?P<month>\d{2})-?(?P<day>\d{2})[ T]?'
                                  r'(?P<hour>\d{2}):?(?P<minute>\d{2}):?(?P<second>\d{2})\.(?P<fraction>\d*)Z/'
@@ -62,6 +69,7 @@ class Summary:
     deployments: int
     play_statistics: int
     uf_messages: int
+    surveys: int
     s3_errors: int
     unexpected_files: int
     disposition: str
@@ -113,6 +121,7 @@ class S3Importer:
         self._playstatistics_rows = []
 
         self._timestamp_str = None
+        # Match eg. archived-data.v2/2023/10/31/tbcd000c/yyyy-mm-ddTHH:MM:SS.sssZ.zip (with or without punctuation), extract timestamp part.
         if m := re.match(r'(?ix).*(\d{4}-?\d{2}-?\d{2}[T ]?\d{2}:?\d{2}:?\d{2}.\d{3}Z).zip', s3_object['Key']):
             self._timestamp_str = m.group(1)
             self._data_source_name = self._s3_object['Key']
@@ -188,6 +197,7 @@ class S3Importer:
             self.report_unmatched_files(zipfile)
         self.emit_statistics()
         self._uf_importer.fill_userrecordings_metadata()
+        self._uf_importer.fill_survey_metadata()
         self.put_processed_data()
         self.update_database()
         self.archive_collected_data()
@@ -212,7 +222,8 @@ class S3Importer:
             talkingbookid = self._tb_collected_data.talkingbookid
         self._summary = Summary(key, zip_len, programid, names, talkingbookid, self.have_statistics,
                                 len(self._tbscollected_rows), len(self._tbsdeployed_rows),
-                                len(self._playstatistics_rows), len(self._uf_importer.uf_messages_csv_rows),
+                                len(self._playstatistics_rows),
+                                len(self._uf_importer.uf_messages_csv_rows), len(self._uf_importer.surveys),
                                 self._s3_write_errors, self._unmatched_files, self._archive_status)
 
         s = self._summary
@@ -223,6 +234,7 @@ class S3Importer:
                        f', {s.deployments} deployments' \
                        f', {s.play_statistics} play stats' \
                        f', {s.uf_messages} uf messages' \
+                       f', {s.surveys} surveys' \
                        f', {s.s3_errors} s3 write errors'
         else:
             summary += f', no collected data found'
@@ -377,6 +389,7 @@ class S3Importer:
                 pkey_name = metadata.primary_key.name
                 pkey_columns = [x.name for x in metadata.primary_key.columns]
                 non_pkey_columns = [x for x in columns if x not in pkey_columns]
+                # If a row exists with the primary key, update the values. PostgreSQL version of UPSERT.
                 if non_pkey_columns:
                     conflict_str = f'ON CONFLICT ON CONSTRAINT {pkey_name} DO UPDATE SET '
                     setters = [f'{x}=EXCLUDED.{x}' for x in non_pkey_columns]
@@ -400,15 +413,29 @@ class S3Importer:
             result = conn.execute(command, normalized)
             print(f'{result.rowcount} rows inserted{"/updated" if self._upsert else ""} into {table_name}.')
 
+        def insert_survey_results():
+            surveys = self._uf_importer.surveys
+            surveys_columns = [s.name for s in get_table_metadata(SURVEYS_TABLE).columns]
+            insert_rows(surveys.values(), SURVEYS_TABLE)
+            survey_data = []
+            for survey in surveys.values():
+                uuid = survey['survey_uuid']
+                rows = [{'survey_uuid':uuid, 'question':key, 'response':value} for key,value in survey.items() if key not in surveys_columns]
+                survey_data.extend(rows)
+            insert_rows(survey_data, SURVEY_RESPONSES_TABLE)
+
+
         with get_db_connection() as conn:
             if self.have_collection and self._save_db:
-                insert_rows(self._tbscollected_rows, 'tbscollected')
+                insert_rows(self._tbscollected_rows, TBS_COLLECTED_TABLE)
             if self.have_deployment and self._save_db:
-                insert_rows(self._tbsdeployed_rows, 'tbsdeployed')
+                insert_rows(self._tbsdeployed_rows, TBS_DEPLOYED_TABLE)
             if self.have_statistics and self._save_db:
-                insert_rows(self._playstatistics_rows, 'playstatistics')
+                insert_rows(self._playstatistics_rows, PLAY_STATISTICS_TABLE)
             if self._uf_importer.have_uf and self._save_uf:
-                insert_rows(self._uf_importer.uf_messages_csv_rows, 'uf_messages')
+                insert_rows(self._uf_importer.uf_messages_csv_rows, UF_MESSAGES_TABLE)
+            if self._uf_importer.have_surveys and self._save_db:
+                insert_survey_results()
 
     def archive_collected_data(self):
         """

@@ -88,7 +88,7 @@ def decode_properties(data: str, sep='=', comment_char='#') -> dict[str, str]:
         if ls and not ls.startswith(comment_char):
             key_value = re.split(sep, ls, 1)
             key = key_value[0].strip()
-            value = key_value[1].strip().strip('"')
+            value = key_value[1].strip().strip('"') if len(key_value) > 1 else key
             props[key] = value
     return props
 
@@ -148,12 +148,15 @@ class TbCollectedData:
         self._verbose = verbose
         self._stats_collected_properties_data = None
         if zip_file_path.is_dir():
+            # The zip file has already been expanded into the given directory.
             zip_file_path = zip_file_path.absolute()  # resolve /./, /../, etc.
             self._zip_file_name = kwargs.get('zip_file_name', str(zip_file_path))
             self._tb_collected_data_path = zip_file_path
             timestamp_str = timestamp_str or zip_file_path.name
         else:
+            # The path to the zip file was passed as the parameter. Expand it.
             self._zip_file_name = str(zip_file_path)
+            # When _temp_dir goes out of scope, the directory and contents will be removed.
             self._temp_dir = tempfile.TemporaryDirectory(prefix=zip_file_path.name)
             temp_path = Path(self._temp_dir.name)
             if self._verbose >= 2:
