@@ -5,7 +5,7 @@ import time
 from re import Match
 from typing import List, Optional, Tuple
 
-from .db import get_db_connection, query_to_csv
+from .db import query_to_csv
 
 """
 This Module validates a query against a set of known columns, and can generate valid SQL equivalent to the query.
@@ -79,19 +79,19 @@ CHOOSABLE_COLUMNS = [
 ]
 
 VIEW_QUERY = '''
-CREATE OR REPLACE TEMP VIEW temp_usage AS (
+WITH temp_usage AS (
   SELECT * FROM usage_info 
-  WHERE recipientid IN (SELECT recipientid FROM recipients WHERE project ILIKE %s) 
+  WHERE recipientid IN (SELECT recipientid FROM recipients WHERE project ILIKE :programid) 
     AND played_seconds>0
-);
+)
 '''
 VIEW_QUERY_DEPL = '''
-CREATE OR REPLACE TEMP VIEW temp_usage AS (
+WITH temp_usage AS (
   SELECT * FROM usage_info 
-  WHERE recipientid IN (SELECT recipientid FROM recipients WHERE project ILIKE %s) 
+  WHERE recipientid IN (SELECT recipientid FROM recipients WHERE project ILIKE :programid) 
     AND played_seconds>0
-    AND deploymentnumber = %s
-);
+    AND deploymentnumber = :deploymentnumber
+)
 '''
 
 TEMP_VIEW = 'temp_usage'
@@ -154,45 +154,6 @@ class SQV2:
         query_str = self.get_query(columns=columns, expressions=expressions) if not errors else None
         return query_str, errors
 
-def get_usage(program: str, columns: str, deployment: str, debug: bool = False):
-    start = time.time_ns()
-
-    sqv2 = SQV2(CHOOSABLE_COLUMNS, TEMP_VIEW, augment='sum(completions),sum(played_seconds)')
-    query, errors = sqv2.parse(columns)
-    if errors:
-        return str(errors)
-
-    cursor = get_db_connection().cursor()
-
-    # Create a convenience view limited to the data of interest.
-    if deployment:
-        print('Program filter: "{}" with: {}, {}'.format(VIEW_QUERY_DEPL, program, deployment))
-        cursor.execute(VIEW_QUERY_DEPL, (program, deployment))
-    else:
-        cursor.execute(VIEW_QUERY, (program,))
-
-    # Run the query
-    num_rows = 0
-    file_like = io.StringIO()
-
-    print('Main query: "{}"'.format(query))
-    cursor.execute(query)
-    num_columns = len(cursor.description)
-    writer = csv.writer(file_like, quoting=csv.QUOTE_MINIMAL)
-    writer.writerow([x.name for x in cursor.description])
-    for record in cursor:
-        num_rows += 1
-        writer.writerow([str(record[ix]) for ix in range(0, num_columns)])
-    end = time.time_ns()
-    print('{} rows in {} mSec'.format(num_rows, (end - start) / 1000000))
-    if debug and num_rows < 10:
-        print('values: {}'.format(file_like.getvalue()))
-
-    return {'column_descriptions': {x.name: x.type_code for x in cursor.description},
-            'row_count': num_rows, 'msec': (end - start) / 1000000,
-            'query': query, 'values': file_like.getvalue()}
-
-
 def get_usage2(programid: str, columns: str, deployment_number = None, debug: bool = False):
     start = time.time_ns()
 
@@ -202,17 +163,20 @@ def get_usage2(programid: str, columns: str, deployment_number = None, debug: bo
         # http error result code
         return str(errors), 400
 
-    cursor = get_db_connection().cursor()
+
+    # cursor = get_raw_db_connection().cursor()
 
     # Create a convenience view limited to the data of interest.
     if deployment_number:
         print('Program filter: "{}" with: {}, {}'.format(VIEW_QUERY_DEPL, programid, deployment_number))
-        cursor.execute(VIEW_QUERY_DEPL, (programid, deployment_number))
+        # cursor.execute(VIEW_QUERY_DEPL, (programid, deployment_number))
+        filtered_query = VIEW_QUERY_DEPL + query
     else:
-        cursor.execute(VIEW_QUERY, (programid,))
+        # cursor.execute(VIEW_QUERY, (programid,))
+        filtered_query = VIEW_QUERY + query
 
     # Run the query
-    usage, num_rows = query_to_csv(query, cursor=cursor)
+    usage, num_rows = query_to_csv(filtered_query, params={'programid':programid, 'deploymentnumber':deployment_number})
     end = time.time_ns()
     print('{} rows in {} mSec'.format(num_rows, (end - start) / 1000000))
     if debug and num_rows < 10:
