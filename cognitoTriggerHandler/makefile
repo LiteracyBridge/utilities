@@ -1,5 +1,5 @@
 PROJECT = cognitoTriggerHandler
-PYTHON = python3.8
+PYTHON = python3.9
 VIRTUAL_ENV = .cognitoenv
 FUNCTION_NAME = cognitoTriggerHandler
 FUNCTION_HANDLER = lambda_function.lambda_handler

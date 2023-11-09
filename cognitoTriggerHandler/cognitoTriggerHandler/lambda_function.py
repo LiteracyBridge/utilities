@@ -1,4 +1,5 @@
 import json
+from contextlib import contextmanager
 from datetime import datetime
 from datetime import datetime
 from typing import List, Dict, Iterable, Tuple
@@ -12,6 +13,102 @@ PROGRAMS_TABLE_NAME = 'programs'
 USER_POOL_ID = 'us-west-2_3evpQGyi5'
 cognito_client = None
 
+
+import pg8000
+from botocore.exceptions import ClientError
+
+from sqlalchemy import create_engine, MetaData, Table, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.sql import TableClause
+
+_impact_db_args = None
+_impact_db_engine = None
+
+def _get_impact_db_secret():
+    secret_name = "sbc-impact-designer-db"
+    region_name = "us-west-2"
+
+    # Create a Secrets Manager client
+    session = boto3.session.Session()
+    client = session.client(
+        service_name='secretsmanager',
+        region_name=region_name
+    )
+
+    try:
+        get_secret_value_response = client.get_secret_value(
+            SecretId=secret_name
+        )
+    except ClientError as e:
+        # For a list of exceptions thrown, see
+        # https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
+        raise e
+
+    # Decrypts secret using the associated KMS key.
+    secret = get_secret_value_response['SecretString']
+
+    # Your code goes here.
+    result = json.loads(secret)
+    return result;
+
+@contextmanager
+def get_impact_db_connection(*, close_with_result=None, engine=None):
+    """
+    A helper to get a db connection and re-establish the 'content' view after a commit or abort.
+    :param close_with_result: If present, passed through to the engine.connect() call.
+    :param engine: Optional engine to use for the call. Default is _impact_db_engine.
+    :return: Provides a Connection through a context manager.
+    """
+    if engine is None:
+        engine = get_impact_db_engine()
+    kwargs = {}
+    if close_with_result is not None:
+        kwargs['close_with_result'] = close_with_result
+    try:
+        with engine.connect(**kwargs) as conn:
+            yield conn
+    finally:
+        pass
+
+def set_impact_db_args(args):
+    global _impact_db_args
+    _impact_db_args = args
+
+
+# lazy initialized db connection
+
+# Make a connection to the SQL database
+def get_impact_db_engine(args=None) -> Engine:
+    global _impact_db_engine, _impact_db_args
+
+    if _impact_db_engine is not None:
+        print('Reusing db engine.')
+    elif _impact_db_engine is None:
+        if _impact_db_args is None:
+            _impact_db_args = args
+        secret = _get_impact_db_secret()
+
+        parms = {'database': 'impact', 'user': secret['username'], 'password': secret['password'],
+                 'host': secret['host'], 'port': secret['port']}
+        for prop in ['host', 'port', 'user', 'password', 'database']:
+            if hasattr(_impact_db_args, f'db_{prop}'):
+                if (val := getattr(_impact_db_args, f'db_{prop}')) is not None:
+                    parms[prop] = val
+
+        # dialect + driver: // username: password @ host:port / database
+        # postgresql+pg8000://dbuser:kx%25jj5%2Fg@pghost10/appdb
+        engine_connection_string = 'postgresql+pg8000://{user}:{password}@{host}:{port}/{database}'.format(**parms)
+        _impact_db_engine = create_engine(engine_connection_string, echo=False)
+
+    return _impact_db_engine
+
+def _is_sbc_impact_designer_invitee(email: str) -> bool:
+    with get_impact_db_connection() as conn:
+        params = {'email': email}
+        query = text(
+            'SELECT email FROM invitations WHERE email=:email UNION SELECT email FROM users WHERE email=:email')
+        result = conn.execute(query, params)
+        return result.rowcount > 0  # invitee, user, or both.
 
 
 def _email_from_event(event: dict) -> str:
@@ -75,8 +172,11 @@ def pre_signup_handler(event):
     # The email address isn't yet claimed. Validate the email address should have access.
     is_known, by_domain = manager.is_email_known(email)
     if not is_known:
-        print(f"pre-signup event for unrecognized email '{email}'. Event: '{event}'")
-        raise Exception(f"'{email}' is not authorized")
+        # Maybe an impact designer user or invitee
+        is_known = _is_sbc_impact_designer_invitee(email)
+        if not is_known:
+            print(f"pre-signup event for unrecognized email '{email}'. Event: '{event}'")
+            raise Exception(f"'{email}' is not authorized")
 
     print(f"pre-signup event success for email '{email}'. Event: '{event}'")
 
@@ -115,7 +215,15 @@ def pre_authentication_handler(event):
     Called early in the authentication process, which may still fail. This is an opportunity to log,
     for instance, event['validationData'], which is a {k:v} of usermetadata from the application.
     """
-    pass
+    try:
+        userData = event.get('request', {}).get('validationData', {})
+        application = userData.get('Application', 'unknown')
+        computer = userData.get('Computer', 'unknown')
+        email = _email_from_event(event)
+        print(f'User {email} authenticating from computer {computer} in application {application}')
+    except:
+        print('Got an exception trying to log user data (application, computer)')
+        pass
 
 
 # noinspection PyUnusedLocal
@@ -139,6 +247,15 @@ def lambda_handler(event, context):
 if __name__ == '__main__':
     import sys
 
+
+    def test_impact(email:str):
+        with get_impact_db_connection() as conn:
+            params = {'email':email}
+            query = text('SELECT email FROM invitations WHERE email=:email UNION SELECT email FROM users WHERE email=:email')
+            result = conn.execute(query, params)
+            print(f'{result.rowcount} rows returned')
+            for row in result:
+                print(row)
 
     def simulate(trigger: str, email: str):
         event = {'triggerSource': trigger, 'request': {'userAttributes': {'email': email}}}
@@ -170,6 +287,9 @@ if __name__ == '__main__':
         print(result)
         rc = 0 if 'exception' in result else 1
         rc_list.append(rc)
+
+        test_impact('bill@amplio.org')
+        test_impact('me@example.com')
 
         return max(rc_list)
 
