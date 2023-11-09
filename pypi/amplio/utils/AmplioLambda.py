@@ -1,11 +1,12 @@
 import binascii
+import copy
 import inspect
 import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from json import JSONEncoder
-from typing import Any, Dict, Callable, Tuple, Union
+from typing import Annotated, Any, Dict, Callable, Tuple, Union, get_type_hints
 
 import amplio.rolemanager.manager as roles_manager
 
@@ -18,29 +19,85 @@ class LambdaEvent(dict):
     pass
 
 
-class BodyParam():
+class LambdaContext(dict):
     pass
 
 
-class JsonBody(dict):
-    pass
+from enum import Enum, auto
+class _ParamSource(Enum):
+    """
+    An Enum to describe the various places in the AWS Lambda function "event" parameter in which the actual args
+    can be found, or an function to provide the value.
+    """
+    def _check_callable(x):
+        """
+        A checker for a "PROVIDER_FUNCTION" argument, ...foo: ProviderFunction[<type>, my_provider_function]... The
+        provided "my_provider_function" should take the Lambda function "event" and "context" as the first two
+        arguments. If additional values are passed to ProviderFunction[...], they are passed as a *args value
+        to the provider function.
+        :raise: SyntaxError if insufficient values are passed to ProviderFunction[...], or if the second value
+            is not a function as determined by inspect.isfunction().
+        :return: None
+        """
+        if not isinstance(x, tuple) or len(x)<2 or not inspect.isfunction(x[1]):
+            raise SyntaxError('Requires function(event,context,...) as second argument')
 
+    def _check_index(x):
+        """
+        A checker for a "PATH_PARAM" argument, ...foo: PathParam[<type>, int]... The
+        provided int is used to select the slash-delimited value from the path parameter.
+        :raise: SyntaxError if insufficient values are passed to PathParam[...], or if the second value
+            is not an int.
+        :return: None
+        """
+        if not isinstance(x, tuple) or len(x)<2 or not isinstance(x[1], int):
+            raise SyntaxError('Requires int as second argument')
 
-class BinBody(bytes):
-    pass
+    CLAIM = object()
+    QUERY_STRING = object()
+    PATH_PARAM = (object(), _check_index)
+    PROVIDER_FUNCTION = (object(), _check_callable)
+    BIN_BODY = object()
+    JSON_BODY = object()
 
+    def __repr__(self):
+        return '<%s.%s>' % (self.__class__.__name__, self.name)
 
-class QueryStringParams(dict):
-    pass
+    def check(self, type_hint):
+        """
+        If this ParamSource requires additional values, check that they're present and of a correct type. See
+        "_check_callable" and "_check_index", above.
+        :param type_hint: The value(s) passed to the ParamSource, like PathParam[int, 2].
+        """
+        if isinstance(self.value, tuple) and len(self.value) >= 2:
+            self.value[1](type_hint)
 
+class AnnotationFactory:
+    def __init__(self, arg_source):
+        self.arg_source = arg_source
 
-class QueryStringParam(str):
-    pass
+    def __getitem__(self, type_hint):
+        self.arg_source.check(type_hint)
+        if isinstance(type_hint, tuple):
+            return Annotated[type_hint[0], (self.arg_source,) + type_hint[1:]]
+        else:
+            return Annotated[type_hint, self.arg_source]
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.arg_source})"
 
-class Claim(str):
-    pass
+    def __eq__(self, other):
+        try:
+            return self.arg_source == other.arg_source
+        except:
+            return False
 
+QueryStringParam = AnnotationFactory(_ParamSource.QUERY_STRING)
+Claim = AnnotationFactory(_ParamSource.CLAIM)
+PathParam = AnnotationFactory(_ParamSource.PATH_PARAM)
+ProviderFunction = AnnotationFactory(_ParamSource.PROVIDER_FUNCTION)
+BinBody = AnnotationFactory(_ParamSource.BIN_BODY)
+JsonBody = AnnotationFactory(_ParamSource.JSON_BODY)
 
 def path_param(n: int):
     def _get_path_param_n(event: LambdaEvent, context: LambdaContext) -> str:
@@ -48,41 +105,6 @@ def path_param(n: int):
         return params[n] if n < len(params) else None
 
     return _get_path_param_n
-
-
-class LambdaCognitoIdentity(object):
-    cognito_identity_id: str
-    cognito_identity_pool_id: str
-
-
-class LambdaClientContextMobileClient(object):
-    installation_id: str
-    app_title: str
-    app_version_name: str
-    app_version_code: str
-    app_package_name: str
-
-
-class LambdaClientContext(object):
-    client: LambdaClientContextMobileClient
-    custom: LambdaDict
-    env: LambdaDict
-
-
-class LambdaContext(object):
-    function_name: str
-    function_version: str
-    invoked_function_arn: str
-    memory_limit_in_mb: int
-    aws_request_id: str
-    log_group_name: str
-    log_stream_name: str
-    identity: LambdaCognitoIdentity
-    client_context: LambdaClientContext
-
-    @staticmethod
-    def get_remaining_time_in_millis() -> int:
-        return 0
 
 
 def camel_to_snake(string: str) -> str:
@@ -95,7 +117,7 @@ def snake_to_camel(string: str) -> str:
     return words[0] + "".join(word.capitalize() for word in words[1:])
 
 
-# subclass JSONEncoder
+# subclass JSONEncoder so that we can encode date & datetime
 class DateTimeEncoder(JSONEncoder):
     # Override the default method
     def default(self, obj):
@@ -128,24 +150,6 @@ def exception_response(ex: Exception, status_code: int = 500, message: str = Non
     return response(status_code, {"error": message})
 
 
-def get_typed_signature(call: Callable[..., Any]) -> inspect.Signature:
-    """
-    Given a callable, return a description of the signature.
-    """
-    signature = inspect.signature(call)
-    typed_params = [
-        inspect.Parameter(
-            name=param.name,
-            kind=param.kind,
-            default=param.default,
-            annotation=param.annotation,
-        )
-        for param in signature.parameters.values()
-    ]
-    typed_signature = inspect.Signature(typed_params)
-    return typed_signature
-
-
 def _prepare_response_content(response: Any, response_model) -> Any:
     if isinstance(response, list):
         return [
@@ -155,7 +159,7 @@ def _prepare_response_content(response: Any, response_model) -> Any:
     return response
 
 
-def _gather_params(handler: Callable, event: LambdaEvent, context: LambdaContext) -> Dict[str, Any]:
+def _gather_args(handler: Callable, event: LambdaEvent, context: LambdaContext) -> Dict[str, Any]:
     """
     Given a function to be called in an AWS Lambda context, and the event and context objects passed 
     to a lambda handler, use the function signature to extract the parameters that the function needs.
@@ -205,64 +209,100 @@ def _gather_params(handler: Callable, event: LambdaEvent, context: LambdaContext
             # The event lies about isBase64Encoded. It is.
             body_bytes = binascii.a2b_base64(body)  # if event.get('isBase64Encoded', False) else bytes(body)
         return body_bytes
-
+             
+    def coerce_param(param, param_type):
+        def bool_param():
+            """:return: the truthiness of param as True or False, or None if no determination can be made."""
+            try:
+                val = str(param).lower()
+                if val in ('y', 'yes', 't', 'true', 'on', '1'): return True
+                elif val in ('n', 'no', 'f', 'false', 'off', '0'): return False
+            except Exception: pass
+            return None
+        def int_param():
+            try: return int(param)
+            except Exception: pass
+        if param_type is None or param is None: return param
+        if param_type==bool: param = bool_param()
+        if param_type==int: param = int_param()
+        return param
+            
     # What arguments does the handler want?
-    endpoint_signature = get_typed_signature(handler)
-    handler_params = endpoint_signature.parameters
+    handler_params = inspect.signature(handler).parameters
+    type_hints = get_type_hints(handler)
 
     # Parse query params
-    query_args = {}
-    if 'queryStringParameters' in event and event['queryStringParameters']:
-        query_args = event['queryStringParameters']
+    query_args = event.get('queryStringParameters', {})
     claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
 
     # Extract params from event and context.
-    params = {}
+    annotated_type = type(Annotated[object, None])
+    kwargs = {}
     for param_name, param in handler_params.items():
         # print(f'param: {param_name}, annotation: {param.annotation}, type(annotation): {type(param.annotation)}')
-        # Is the parameter from the body?
-        if (param.annotation == type(BodyParam())):
-            params[param.name] = get_snakish(get_body_json(), param.name)
+        param_source: _ParamSource = _ParamSource.QUERY_STRING
+        param_type: type = type_hints[param_name]
+        if type(param.annotation) is annotated_type:
+            annotation_md = param.annotation.__metadata__[0]
+            if isinstance(annotation_md, tuple):
+                md_args = list(annotation_md)[1:]
+                param_source = annotation_md[0]
+            else:
+                md_args = []
+                param_source = annotation_md
+        elif param.annotation in [JsonBody, BinBody, Claim, PathParam, QueryStringParam, ProviderFunction]:
+            md_args = []
+            param_source = param.annotation.arg_source
+
+        print(f'Param {param_name}, source {param_source}')
+        # NOTE: At one time there were numerous getters here. Most were unused,
+        # and have been removed. Add new ones only when actually needed.
+        # “Entities should not be multiplied beyond necessity.”
+
+        # It is not possible to pass "None" in the lambda event, so we can use this
+        # to mean "no value provided".
+        param_value = None
 
         # Is the parameter the entire body as JSON?
-        elif (param.annotation == type(JsonBody())):
-            params[param.name] = get_body_json()
+        if param_source == _ParamSource.JSON_BODY:
+            param_value = get_body_json()
 
         # Is the parameter the entire body as a base-64 encoded string?
-        elif (param.annotation == type(BinBody())):
-            params[param.name] = get_body_bytes()
+        elif param_source == _ParamSource.BIN_BODY:
+            param_value = get_body_bytes()
 
         # Is the parameter from the querystring?
-        elif (param.annotation == type(QueryStringParam())):
-            params[param.name] = get_snakish(query_args, param.name)
-
-        # Is the parameter ALL the query string params?
-        elif (param.annotation == type(QueryStringParams())):
-            params[param.name] = query_args
+        elif param_source == _ParamSource.QUERY_STRING:
+            param_value = get_snakish(query_args, param_name)
 
         # Is the parameter one of the claims?
-        elif (param.annotation == type(Claim())):
-            params[param.name] = get_snakish(claims, param.name)
+        elif param_source == _ParamSource.CLAIM:
+            param_value = get_snakish(claims, param_name)
 
-        # Is the parameter a generator function? Generate it.
-        elif inspect.isgeneratorfunction(param.default):
-            params[param.name] = next(param.default())
+        elif param_source == _ParamSource.PATH_PARAM:
+            path_ix = md_args[0] # which path component?
+            path_params = event.get('pathParameters', {}).get('proxy', '').split('/')
+            param_value =  path_params[path_ix] if path_ix < len(path_params) else None
 
-        # Is the type of the parameter 'function'? We'll call the function to get the value.
-        elif inspect.isfunction(param.default):
-            params[param.name] = param.default(event, context)
-
-        # # Is the type of the parameter a ModelMetaclass, whatever that is?
-        # elif isinstance(param.annotation, ModelMetaclass):
-        #     params[param.name] = param.annotation.parse_obj(get_body_json())
+        elif param_source == _ParamSource.PROVIDER_FUNCTION:
+            fn = md_args[0] # get provider function
+            if inspect.isgeneratorfunction(fn):
+                param_value = next(fn())
+            else:
+                fn_args = md_args[1:]
+                param_value = fn(event, context, *fn_args)
 
         # Is the parameter 'event' or 'context'?
-        elif (param.annotation == type(LambdaEvent()) or param.name == 'event'):
-            params[param.name] = event
-        elif (param.annotation == type(LambdaContext) or param.name == 'context'):
-            params[param.name] = context
+        elif (param.annotation == type(LambdaEvent()) or param_name == 'event'):
+            param_value = event
+        elif (param.annotation == type(LambdaContext) or param_name == 'context'):
+            param_value = context
 
-    return params
+        if param_value is not None:
+            param_value = coerce_param(param_value, param_type)
+            kwargs[param_name] = param_value
+
+    return kwargs
 
 
 @dataclass
@@ -340,7 +380,7 @@ class LambdaRouter():
     the proper arguments.
 
     Sample usage:
-        @handler(role='AD,PM') # user must be configured with AD or PM role in the program.
+        @handler(roles='AD,PM') # user must be configured with AD or PM role in the program.
         def some_pm_function(programid: queryStringParam, data_desired: JsonBody):
             result, http_response_code = do_pm_work(programid, data_desired)
             return result, http_response_code
@@ -397,19 +437,19 @@ class LambdaRouter():
         if action not in self._handlers:
             raise Exception(f'Error: Lambda router has no action {action}')
         handler = self._handlers[action]
-        params = _gather_params(handler.function, self._event, self._context)
+        kwargs = _gather_args(handler.function, self._event, self._context)
         try:
             allowed_roles = handler.allowed_roles
         except Exception as ex:
             allowed_roles = None
         if allowed_roles:
-            programid = self._determine_programid(handler, params)
+            programid = self._determine_programid(handler, kwargs)
             if not self._user_has_allowed_role(allowed_roles, self.claim('email'), programid):
                 return response(status_code=403,
                                 body={'message': 'This user does not have an appropriate role in the program'})
 
         result: Any = None
-        returned_value = handler.function(**params)
+        returned_value = handler.function(**kwargs)
         if isinstance(returned_value, tuple) and len(returned_value) == 2 and (
                 isinstance(returned_value[1], int) or returned_value[1] is None):
             result = returned_value[0]
